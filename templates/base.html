@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MIDI Library{% endblock %}</title>
+    <link rel="stylesheet" href="{{ '/static/style.css' | urlencode }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+
+    <nav class="main-nav">
+        <a href="{{ '/index.html' | urlencode }}">Composers</a>
+        </nav>
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="player-bar">
+        <div class="player-controls">
+            <button id="prev-button" class="player-btn"><i class="fas fa-backward-step"></i></button>
+            <button id="play-pause-button" class="player-btn play-btn"><i class="fas fa-play"></i></button>
+            <button id="next-button" class="player-btn"><i class="fas fa-forward-step"></i></button>
+            <button id="shuffle-button" class="player-btn"><i class="fas fa-shuffle"></i></button>
+        </div>
+        <div class="now-playing">
+            <span id="now-playing-title">---</span>
+        </div>
+        <div class="midi-settings">
+            <label for="midi-output-device">Output:</label>
+            <select id="midi-output-device">
+                <option value="">No Device Selected</option>
+            </select>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/webmidi@latest/dist/iife/webmidi.iife.js"></script>
+    
+    <script src="{{ '/static/js/midi-player.js' | urlencode }}"></script>
+    <script src="{{ '/static/js/MidiControl.js' | urlencode }}"></script>
+    <script src="{{ '/static/js/Playlist.js' | urlencode }}"></script>
+    <script src="{{ '/static/js/App.js' | urlencode }}"></script>
+    
+    {% block scripts %}{% endblock %}
+
+</body>
+</html>

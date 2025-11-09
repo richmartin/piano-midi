@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}{{ file.title }} - MIDI Library{% endblock %}
+
+{% block content %}
+    <div class="page-header">
+        <h1>{{ file.title }}</h1>
+        {% set composer = model.composers[file.composer_slug] %}
+        {% if composer %}
+            <h3>By <a href="{{ composer.page_url | urlencode }}">{{ composer.name }}</a></h3>
+        {% endif %}
+    </div>
+
+    <div classs="entity-controls">
+        <button class="action-button" id="page-play-button">
+            <i class="fas fa-play"></i> Play this file
+        </button>
+    </div>
+
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        const PAGE_PLAYLIST_DATA = {{ playlist_json | safe }};
+    </script>
+{% endblock %}

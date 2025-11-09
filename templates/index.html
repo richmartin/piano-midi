@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Composers - MIDI Library{% endblock %}
+
+{% block content %}
+    <div class="page-header">
+        <h1>Composers</h1>
+    </div>
+
+    <div class="grid-container">
+        {% for composer in composers %}
+            <a href="{{ composer.page_url | urlencode }}" class="grid-item-link">
+                <div class="grid-item">
+                    <div class="grid-item-image">
+                        {% if composer.image_url %}
+                            <img src="{{ composer.image_url }}" alt="{{ composer.name }}">
+                        {% else %}
+                            <div class="placeholder-image">
+                                <i class="fas fa-user"></i>
+                            </div>
+                        {% endif %}
+                    </div>
+                    <div class="grid-item-title">{{ composer.name }}</div>
+                </div>
+            </a>
+        {% else %}
+            <p>No composers found. Run the generator script.</p>
+        {% endfor %}
+    </div>
+{% endblock %}
