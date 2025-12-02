@@ -204,7 +204,7 @@ class MidiLibraryGenerator:
         self.files_dir = self.output_dir / "files"
 
         # Initialize Wikipedia client
-        cache_file = self.output_dir / WIKI_CACHE_FILE
+        cache_file = self.input_dir / WIKI_CACHE_FILE
         self.wiki_client = WikipediaClient(cache_file)
         
         # Initialize Jinja2
@@ -329,7 +329,7 @@ class MidiLibraryGenerator:
                 model['composers'][composer_slug] = {
                     "name": composer_name,
                     "slug": composer_slug,
-                    "page_url": f"composers/{composer_slug}.html",
+                    "page_url": f"/composers/{composer_slug}.html",
                     "works": [],
                     **wiki_data
                 }
@@ -343,7 +343,7 @@ class MidiLibraryGenerator:
                 model['performers'][performer_slug] = {
                     "name": performer_name,
                     "slug": performer_slug,
-                    "page_url": f"performers/{performer_slug}.html",
+                    "page_url": f"/performers/{performer_slug}.html",
                     "works": [],
                     **wiki_data
                 }
@@ -359,8 +359,8 @@ class MidiLibraryGenerator:
                 "title": metadata['work'],
                 "composer_slug": composer_slug,
                 "performer_slug": performer_slug,
-                "page_url": f"files/{file_id}.html",
-                "midi_url": f"midi-files/{file_id}.mid" # Relative URL
+                "page_url": f"/files/{file_id}.html",
+                "midi_url": f"/midi-files/{file_id}.mid" # Relative URL
             }
 
         logging.info("Data model built. Generating playlists...")
