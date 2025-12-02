@@ -1,42 +1,39 @@
 
-// Simple sinewave synthesizer for testing when I don't have my piano in my pocket.
-class TestSynthOutput {
-    constructor(context = null) {
-        this.context = context || new (window.AudioContext || window.webkitAudioContext)();
-        this.voices = new Map();
+import { SplendidGrandPiano } from 'https://unpkg.com/smplr/dist/index.mjs';
+
+// High-quality sampled piano using smplr and Salamander Grand Piano
+class SoundFontOutput {
+    constructor() {
+        this.context = new (window.AudioContext || window.webkitAudioContext)();
+        this.piano = new SplendidGrandPiano(this.context);
+        this.activeNotes = new Map(); // Store stop functions
+        console.log("Initializing Salamander Grand Piano...");
+
+        // Preload some samples (optional but good for responsiveness)
+        // The library handles loading on demand, but we can trigger it early.
     }
-    _noteToFreq(note) {
-        const A4 = 440;
-        const map = {
-            C: -9, "C#": -8, Db: -8, D: -7, "D#": -6, Eb: -6, E: -5,
-            F: -4, "F#": -3, Gb: -3, G: -2, "G#": -1, Ab: -1,
-            A: 0, "A#": 1, Bb: 1, B: 2
-        };
-        const [, letter, accidental, octaveStr] = note.match(/^([A-G])(#|b)?(\d)$/);
-        const semis = map[letter + (accidental || "")];
-        const octave = parseInt(octaveStr);
-        const n = semis + (octave - 4) * 12;
-        return A4 * Math.pow(2, n / 12);
-    }
+
     sendNoteOn(note, { velocity = 100 } = {}) {
-        const freq = this._noteToFreq(note);
-        const osc = this.context.createOscillator();
-        const gain = this.context.createGain();
-        osc.type = "sine";
-        const vol = velocity / 127 * 0.3;
-        gain.gain.setValueAtTime(vol, this.context.currentTime);
-        osc.frequency.value = freq;
-        osc.connect(gain).connect(this.context.destination);
-        osc.start();
-        this.voices.set(note, { osc, gain });
+        // smplr expects velocity 0-127
+        // note can be "C4", etc.
+
+        // Stop existing note if playing (re-trigger)
+        this.sendNoteOff(note);
+
+        const stopFn = this.piano.start({
+            note: note,
+            velocity: velocity
+        });
+
+        this.activeNotes.set(note, stopFn);
     }
+
     sendNoteOff(note) {
-        const v = this.voices.get(note);
-        if (!v) return;
-        const now = this.context.currentTime;
-        v.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-        v.osc.stop(now + 0.1);
-        this.voices.delete(note);
+        const stopFn = this.activeNotes.get(note);
+        if (stopFn) {
+            stopFn(); // This triggers the release sample/envelope
+            this.activeNotes.delete(note);
+        }
     }
 }
 
@@ -169,7 +166,7 @@ class MidiController {
             // Listen for user selection
             this.outputSelect.addEventListener("change", () => {
                 if (this.outputSelect.value == "testsynth") {
-                    this.selectedOutput = new TestSynthOutput();
+                    this.selectedOutput = new SoundFontOutput();
                 } else {
                     this.selectedOutput = WebMidi.getOutputById(this.outputSelect.value);
                 }
@@ -190,27 +187,70 @@ class MidiController {
     populateDevices() {
         console.log("Populating MIDI output devices...");
         // Clear existing options
-        this.outputSelect.innerHTML = '<option value="">Select MIDI Output...</option>';
+        this.outputSelect.innerHTML = '';
 
-        if (WebMidi.outputs.length === 0) {
-            const option = document.createElement("option");
-            option.value = "testsynth";
-            option.textContent = "Test Synthesizer (no MIDI device)";
-            this.outputSelect.appendChild(option);
-        } else {
+        // 1. Always add the Software Synthesizer option
+        const softwareOption = document.createElement("option");
+        softwareOption.value = "testsynth";
+        softwareOption.textContent = "Salamander Grand Piano (Software)";
+        this.outputSelect.appendChild(softwareOption);
+
+        // 2. Add External Devices Group
+        if (WebMidi.outputs.length > 0) {
+            const group = document.createElement("optgroup");
+            group.label = "External MIDI Devices";
+
             WebMidi.outputs.forEach(output => {
                 const option = document.createElement("option");
                 option.value = output.id;
                 option.textContent = output.name;
-                this.outputSelect.appendChild(option);
+                group.appendChild(option);
             });
+            this.outputSelect.appendChild(group);
         }
 
-        // Auto-select the last device
+        // 3. Auto-select logic
+        // If we have a previously selected output and it still exists, keep it.
+        // Otherwise, if there are external devices, pick the last one.
+        // Otherwise, default to Software Synth.
+
+        let targetId = "testsynth"; // Default
+
         if (WebMidi.outputs.length > 0) {
-            this.selectedOutput = WebMidi.outputs[WebMidi.outputs.length - 1]
-            this.outputSelect.value = this.selectedOutput.id;
-            console.log("Auto-selected MIDI Output:", this.selectedOutput.name);
+            // Prefer the last external device if available
+            targetId = WebMidi.outputs[WebMidi.outputs.length - 1].id;
+        }
+
+        // If the user had already selected something, try to preserve it
+        if (this.selectedOutput && this.selectedOutput.id) {
+            // Check if it's still in the list (or is the synth)
+            if (this.selectedOutput instanceof SoundFontOutput) {
+                targetId = "testsynth";
+            } else {
+                const exists = WebMidi.outputs.find(o => o.id === this.selectedOutput.id);
+                if (exists) {
+                    targetId = this.selectedOutput.id;
+                }
+            }
+        }
+
+        this.outputSelect.value = targetId;
+
+        // Trigger the change event to update the player
+
+        if (targetId === "testsynth") {
+            if (!(this.selectedOutput instanceof SoundFontOutput)) {
+                this.selectedOutput = new SoundFontOutput();
+                this.player = new MidiPlayer(this.selectedOutput);
+                console.log("Switched to Software Synthesizer");
+            }
+        } else {
+            const device = WebMidi.getOutputById(targetId);
+            if (device && (!this.selectedOutput || this.selectedOutput.id !== device.id)) {
+                this.selectedOutput = device;
+                this.player = new MidiPlayer(this.selectedOutput);
+                console.log("Switched to External Device:", device.name);
+            }
         }
     }
 }

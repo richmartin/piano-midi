@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,11 +8,12 @@
     <link rel="stylesheet" href="{{ '/static/style.css' | urlencode }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
+
 <body>
 
     <nav class="main-nav">
         <a href="{{ '/index.html' | urlencode }}">Composers</a>
-        </nav>
+    </nav>
 
     <main class="content">
         {% block content %}{% endblock %}
@@ -36,13 +38,14 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/webmidi@latest/dist/iife/webmidi.iife.js"></script>
-    
+
     <script type="module" src="{{ '/static/js/webmidi.3.1.8.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/midi.2.0.28.js' | urlencode }}"></script>
     <script src="{{ '/static/js/Playlist.js' | urlencode }}"></script>
-    <script src="{{ '/static/js/App.js' | urlencode }}"></script>
-    
+    <script type="module" src="{{ '/static/js/App.js' | urlencode }}"></script>
+
     {% block scripts %}{% endblock %}
 
 </body>
+
 </html>
