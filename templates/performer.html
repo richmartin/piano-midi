@@ -3,56 +3,61 @@
 {% block title %}{{ performer.name }} - MIDI Library{% endblock %}
 
 {% block content %}
-    <div class="page-grid-container">
-        <div class="page-grid-left">
-            <div class="entity-header">
-                <div class="entity-image">
-                    {% if performer.image_url %}
-                        <img src="{{ performer.image_url }}" alt="{{ performer.name }}">
-                    {% else %}
-                        <div class="placeholder-image-large">
-                            <i class="fas fa-user"></i>
-                        </div>
-                    {% endif %}
+<div class="page-grid-container" id="page-data" data-playlist='{{ playlist_json }}'>
+    <div class="page-grid-left">
+        <div class="entity-header">
+            <div class="entity-image">
+                {% if performer.image_url %}
+                <img src="{{ performer.image_url }}" alt="{{ performer.name }}">
+                {% else %}
+                <div class="placeholder-image-large">
+                    <i class="fas fa-user"></i>
                 </div>
-                <div class="entity-info">
-                    <h1>{{ performer.name }}</h1>
-                    <div class="entity-summary">
-                        <p>{{ performer.summary }}</p>
-                    </div>
-                    <div classs="entity-controls">
-                        <button class="action-button" id="page-play-button">
-                            <i class="fas fa-play"></i> Play
-                        </button>
-                        <button class="action-button" id="page-shuffle-button">
-                            <i class="fas fa-shuffle"></i> Shuffle
-                        </button>
-                    </div>
-                </div>
+                {% endif %}
             </div>
-        </div>
-        
-        <div class="page-grid-right">
-            <div class="track-list-container">
-                <h2>Works</h2>
-                <ul class="track-list">
-                    {% for file_id in performer.works %}
-                        {% set file = model.files[file_id] %}
-                        <li class="track-item track-item-clickable" 
-                            data-track-url="{{ file.midi_url | urlencode }}" 
-                            data-track-title="{{ file.title }}">
-                            <span class="track-title">{{ file.title }}</span>
-                            <a href="{{ file.page_url | urlencode }}" class="track-link"><i class="fas fa-info-circle"></i></a>
-                        </li>
-                    {% endfor %}
-                </ul>
+            <div class="entity-info">
+                <h1>{{ performer.name }}</h1>
+                <div class="entity-summary">
+                    <p>{{ performer.summary }}</p>
+                </div>
+                <div classs="entity-controls">
+                    <button class="action-button" id="page-play-button">
+                        <i class="fas fa-play"></i> Play
+                    </button>
+                    <button class="action-button" id="page-shuffle-button">
+                        <i class="fas fa-shuffle"></i> Shuffle
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-{% endblock %}
 
-{% block scripts %}
-    <script>
-        const PAGE_PLAYLIST_DATA = {{ playlist_json | safe }};
-    </script>
+    <div class="page-grid-right">
+        <div class="track-list-container">
+            <h2>Works</h2>
+            <ul class="track-list">
+                {% for file_id in performer.works %}
+                {% set file = model.files[file_id] %}
+                <li class="track-item">
+                    <div class="track-info">
+                        <span class="track-title">{{ file.title }}</span>
+                        <a href="{{ file.page_url | urlencode }}" class="track-link"><i
+                                class="fas fa-info-circle"></i></a>
+                    </div>
+                    <div class="track-controls">
+                        <button class="queue-btn play-now-btn" data-track-url="{{ file.midi_url | urlencode }}"
+                            data-track-title="{{ file.title }}" title="Play Now">
+                            <i class="fas fa-play"></i>
+                        </button>
+                        <button class="queue-btn add-queue-btn" data-track-url="{{ file.midi_url | urlencode }}"
+                            data-track-title="{{ file.title }}" title="Add to Queue">
+                            <i class="fas fa-list-ul"></i>
+                        </button>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
 {% endblock %}

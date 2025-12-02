@@ -255,6 +255,8 @@ class MidiController {
     }
 }
 
+import { Navigation } from './Navigation.js';
+
 /**
  * App.js
  * 
@@ -271,48 +273,169 @@ document.addEventListener('DOMContentLoaded', () => {
     const playlist = new Playlist(midiController);
     playlist.bindEvents();
 
-    const pagePlayButton = document.getElementById('page-play-button');
-    const pageShuffleButton = document.getElementById('page-shuffle-button');
+    // Initialize Navigation
+    const nav = new Navigation();
 
-    // Check if PAGE_PLAYLIST_DATA exists (embedded in composer/file.html)
-    if (typeof PAGE_PLAYLIST_DATA !== 'undefined') {
-        if (pagePlayButton) {
-            pagePlayButton.addEventListener('click', () => {
-                console.log("Page Play button clicked");
-                playlist.isShuffle = false; // Reset shuffle
-                playlist.shuffleBtn.classList.remove('active');
-                playlist.load(PAGE_PLAYLIST_DATA, true);
-            });
+    // Function to bind page-specific events
+    const bindPageEvents = () => {
+        console.log("Binding page events...");
+        const pagePlayButton = document.getElementById('page-play-button');
+        const pageShuffleButton = document.getElementById('page-shuffle-button');
+        const pageDataElement = document.getElementById('page-data');
+
+        let pagePlaylistData = null;
+        if (pageDataElement && pageDataElement.dataset.playlist) {
+            try {
+                pagePlaylistData = JSON.parse(pageDataElement.dataset.playlist);
+            } catch (e) {
+                console.error("Failed to parse page playlist data", e);
+            }
         }
 
-        if (pageShuffleButton) {
-            pageShuffleButton.addEventListener('click', () => {
-                console.log("Page Shuffle button clicked");
-                playlist.isShuffle = true;
-                playlist.shuffleBtn.classList.add('active');
-                playlist.load(PAGE_PLAYLIST_DATA, true);
-            });
+        if (pagePlaylistData) {
+            if (pagePlayButton) {
+                // Remove old listeners to avoid duplicates (though swapping DOM handles this mostly)
+                // But since we are swapping innerHTML of main, the buttons are new elements.
+                pagePlayButton.addEventListener('click', () => {
+                    console.log("Page Play button clicked");
+                    playlist.isShuffle = false; // Reset shuffle
+                    playlist.shuffleBtn.classList.remove('active');
+                    playlist.load(pagePlaylistData, true);
+                });
+            }
+
+            if (pageShuffleButton) {
+                pageShuffleButton.addEventListener('click', () => {
+                    console.log("Page Shuffle button clicked");
+                    playlist.isShuffle = true;
+                    playlist.shuffleBtn.classList.add('active');
+                    playlist.load(pagePlaylistData, true);
+                });
+            }
         }
+
+        // Play Now Buttons
+        document.querySelectorAll('.play-now-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent bubbling
+                const trackUrl = btn.dataset.trackUrl;
+                const trackTitle = btn.dataset.trackTitle;
+                console.log(`Play Now clicked: ${trackTitle}`);
+
+                if (trackUrl && trackTitle) {
+                    const track = { "title": trackTitle, "url": trackUrl };
+                    playlist.isShuffle = false;
+                    playlist.shuffleBtn.classList.remove('active');
+                    playlist.playNext([track]);
+                }
+            });
+        });
+
+        // Add to Queue Buttons
+        document.querySelectorAll('.add-queue-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const trackUrl = btn.dataset.trackUrl;
+                const trackTitle = btn.dataset.trackTitle;
+                console.log(`Add to Queue clicked: ${trackTitle}`);
+
+                if (trackUrl && trackTitle) {
+                    const track = { "title": trackTitle, "url": trackUrl };
+                    playlist.addToQueue([track]);
+
+                    // Visual feedback (optional)
+                    const icon = btn.querySelector('i');
+                    const originalClass = icon.className;
+                    icon.className = 'fas fa-check';
+                    setTimeout(() => icon.className = originalClass, 1000);
+                }
+            });
+        });
+    };
+
+    // Bind events for the initial page load
+    bindPageEvents();
+
+    // Re-bind events when a new page is loaded via Navigation.js
+    document.addEventListener('page:loaded', (e) => {
+        console.log(`Page loaded via SPA: ${e.detail.url}`);
+        bindPageEvents();
+    });
+
+    // --- Playlist UI Logic ---
+    const nextUpTitle = document.getElementById('next-up-title');
+    const playlistToggleBtn = document.getElementById('playlist-toggle-btn');
+    const playlistModal = document.getElementById('playlist-modal');
+    const playlistCloseBtn = document.getElementById('playlist-close-btn');
+    const playlistItems = document.getElementById('playlist-items');
+
+    // Toggle Playlist Modal
+    if (playlistToggleBtn && playlistModal) {
+        playlistToggleBtn.addEventListener('click', () => {
+            playlistModal.classList.toggle('hidden');
+            renderPlaylist(); // Re-render when opening
+        });
     }
 
-    document.querySelectorAll('.track-item-clickable').forEach(item => {
-        item.addEventListener('click', () => {
-            const trackUrl = item.dataset.trackUrl;
-            const trackTitle = item.dataset.trackTitle;
-            console.log(`Track item clicked: ${trackTitle}`);
-            if (trackUrl && trackTitle) {
-                const singleTrackPlaylist = [
-                    {
-                        "title": trackTitle,
-                        "url": trackUrl
-                    }
-                ];
-                playlist.isShuffle = false; // turn off shuffle for single track
-                playlist.shuffleBtn.classList.remove('active');
-                playlist.load(singleTrackPlaylist, true); // Load and play
-            }
+    if (playlistCloseBtn && playlistModal) {
+        playlistCloseBtn.addEventListener('click', () => {
+            playlistModal.classList.add('hidden');
         });
+    }
+
+    // Render Playlist
+    const renderPlaylist = () => {
+        if (!playlistItems) return;
+        playlistItems.innerHTML = '';
+
+        playlist.tracks.forEach((track, index) => {
+            const li = document.createElement('li');
+            li.className = `playlist-track ${index === playlist.currentIndex ? 'active' : ''}`;
+            li.innerHTML = `
+                <span class="playlist-track-index">${index + 1}</span>
+                <span class="playlist-track-title">${track.title}</span>
+            `;
+            li.addEventListener('click', () => {
+                playlist.jumpTo(index);
+                renderPlaylist(); // Update active state
+            });
+            playlistItems.appendChild(li);
+        });
+
+        // Scroll active into view if needed
+        const activeItem = playlistItems.querySelector('.active');
+        if (activeItem) {
+            activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    };
+
+    // Listen for Playlist Updates
+    document.addEventListener('playlist:updated', (e) => {
+        console.log("Playlist updated, re-rendering UI...");
+        renderPlaylist();
+        updateNextUp(e.detail.tracks, e.detail.currentIndex);
     });
+
+    document.addEventListener('playlist:trackChanged', (e) => {
+        console.log("Track changed, updating UI...");
+        renderPlaylist();
+
+        // Update Next Up
+        const nextTrack = e.detail.nextTrack;
+        if (nextTrack) {
+            nextUpTitle.textContent = nextTrack.title;
+        } else {
+            nextUpTitle.textContent = "---";
+        }
+    });
+
+    const updateNextUp = (tracks, currentIndex) => {
+        if (tracks && tracks.length > currentIndex + 1) {
+            nextUpTitle.textContent = tracks[currentIndex + 1].title;
+        } else {
+            nextUpTitle.textContent = "---";
+        }
+    };
 
     console.log("App ready.");
 });

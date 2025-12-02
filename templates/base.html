@@ -28,8 +28,11 @@
         </div>
         <div class="now-playing">
             <span id="now-playing-title">---</span>
+            <div class="next-up">Next: <span id="next-up-title">---</span></div>
         </div>
         <div class="midi-settings">
+            <button id="playlist-toggle-btn" class="player-btn" title="Toggle Playlist"><i
+                    class="fas fa-list"></i></button>
             <label for="midi-output-device">Output:</label>
             <select id="midi-output-device">
                 <option value="">No Device Selected</option>
@@ -37,10 +40,21 @@
         </div>
     </footer>
 
+    <div id="playlist-modal" class="playlist-modal hidden">
+        <div class="playlist-header">
+            <h3>Current Queue</h3>
+            <button id="playlist-close-btn" class="close-btn"><i class="fas fa-times"></i></button>
+        </div>
+        <ul id="playlist-items" class="playlist-items">
+            <!-- Items injected by JS -->
+        </ul>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/webmidi@latest/dist/iife/webmidi.iife.js"></script>
 
     <script type="module" src="{{ '/static/js/webmidi.3.1.8.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/midi.2.0.28.js' | urlencode }}"></script>
+    <script type="module" src="{{ '/static/js/Navigation.js' | urlencode }}"></script>
     <script src="{{ '/static/js/Playlist.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/App.js' | urlencode }}"></script>
 
