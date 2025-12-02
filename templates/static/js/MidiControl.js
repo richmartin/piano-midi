@@ -7,7 +7,7 @@
  * - Instantiates MidiPlayerJS 
  * - Creates the "bridge" to send parser events to the selected output device. [6]
  */
-class MidiControl {
+class MidiPlayer {
     constructor(outputSelectElementId) {
         this.outputSelect = document.getElementById(outputSelectElementId);
         this.selectedOutput = null;
@@ -70,8 +70,8 @@ class MidiControl {
         
         // Try to auto-select the first device
         if (WebMidi.outputs.length > 0) {
-            this.outputSelect.value = WebMidi.outputs.id; // <--- FIX
-            this.selectedOutput = WebMidi.outputs; // <--- FIX
+            this.selectedOutput = WebMidi.outputs[WebMidi.outputs.length - 1]
+            this.outputSelect.value = this.selectedOutput.id;
             console.log("Auto-selected MIDI Output:", this.selectedOutput.name);
         }
     }
@@ -100,6 +100,7 @@ class MidiControl {
 
         // Get the MIDI channel (1-16)
         const channel = this.selectedOutput.channels[event.channel];
+        console.log(`MIDI Event: ${event.name} on channel ${event.channel}`);
 
         switch (event.name) {
             case 'Note on':
@@ -110,7 +111,7 @@ class MidiControl {
                 break;
             case 'Note off':
                 // Send a 'noteoff' message
-                channel.stopNote(event.notName);
+                channel.stopNote(event.noteName);
                 break;
             case 'Set tempo':
                 this.player.setTempo(event.data);
@@ -129,8 +130,11 @@ class MidiControl {
             this.player.stop();
         }
         
-        this.player.loadUrl(midiFileUrl);
-        this.player.play();
+        this.player.loadUrl(midiFileUrl).then(() => {
+            this.player.play();
+        }).catch(err => {
+            console.error("Error loading MIDI file:", err);
+        });
     }
     
     pause() {

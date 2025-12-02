@@ -732,6 +732,7 @@ var Player = /*#__PURE__*/function () {
     key: "loadArrayBuffer",
     value: function loadArrayBuffer(arrayBuffer) {
       this.buffer = new Uint8Array(arrayBuffer);
+      console.log("Loaded array buffer of length ".concat(this.buffer.length));
       return this.fileLoaded();
     }
     /**
@@ -765,8 +766,8 @@ var Player = /*#__PURE__*/function () {
     key: "loadUrl",
     value: function loadUrl(url) {
       var _this = this; // Save context for promises
-
-      fetch(url)
+      // The 'fileLoaded' event will fire when loading is complete.
+      return fetch(url)
         .then(function(response) {
           if (!response.ok) {
             throw new Error('HTTP error! status: ' + response.status);
@@ -783,9 +784,6 @@ var Player = /*#__PURE__*/function () {
           _this.triggerPlayerEvent('error', { type: 'loadUrl', message: error.message });
         });
 
-      // Return 'this' for chainability, though loading is async.
-      // The 'fileLoaded' event will fire when loading is complete.
-      return this;
     }
   }, {
     key: "getFilesize",
@@ -913,7 +911,7 @@ var Player = /*#__PURE__*/function () {
         this.tracks.forEach(function (track, index) {
           // Handle next event
           if (!dryRun && this.endOfFile()) {
-            //console.log('end of file')
+            console.log('end of file')
             this.triggerPlayerEvent('endOfFile');
             this.stop();
           } else {

@@ -8,8 +8,8 @@
  * - Listens for 'midi:trackEnded' to advance to the next track.
  */
 class Playlist {
-    constructor(midiControl) {
-        this.midiControl = midiControl;
+    constructor(midiController) {
+        this.midiController = midiController;
         this.tracks = []; // <--- THIS WAS THE BUG
         this.currentIndex = 0;
         this.isPlaying = false;
@@ -83,13 +83,15 @@ class Playlist {
         //if (this.midiControl.player.isPaused()) {
             //this.midiControl.resume();
         //} else {
-            this.midiControl.loadAndPlay(track.url);
+            this.midiController.player.loadUrl(track.url).then(() => {;
+                this.midiController.player.play();
+            });
         //}
     }
     
     pause() {
         this.isPlaying = false;
-        this.midiControl.pause();
+        this.midiController.player.pause();
         this.updatePlayButton(false);
     }
     
