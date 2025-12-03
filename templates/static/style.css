@@ -19,13 +19,25 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: var(--color-bg);
     color: var(--color-text);
-    padding-bottom: var(--player-height); /* Space for the player bar */
+    padding-bottom: var(--player-height);
+    /* Space for the player bar */
+}
+
+.site-footer {
+    text-align: center;
+    padding: 1rem;
+    color: #555;
+    font-size: 0.8rem;
+    margin-top: 2rem;
+    padding-bottom: 2rem;
+    /* Extra space so it's not right up against the player bar */
 }
 
 a {
     color: var(--color-primary);
     text-decoration: none;
 }
+
 a:hover {
     text-decoration: underline;
 }
@@ -43,6 +55,7 @@ a:hover {
     margin-right: 1.5rem;
     text-decoration: none;
 }
+
 .main-nav a:hover {
     color: var(--color-primary);
 }
@@ -56,10 +69,12 @@ a:hover {
 .page-header {
     margin-bottom: 2rem;
 }
+
 .page-header h1 {
     font-size: 2.5rem;
     font-weight: bold;
 }
+
 .page-header h3 {
     font-size: 1.5rem;
     font-weight: 300;
@@ -72,28 +87,34 @@ a:hover {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 1.5rem;
 }
+
 .grid-item-link {
     text-decoration: none;
 }
+
 .grid-item {
     background-color: var(--color-surface);
     border-radius: 8px;
     overflow: hidden;
     transition: background-color 0.2s ease;
 }
+
 .grid-item:hover {
     background-color: #282828;
 }
+
 .grid-item-image {
     width: 100%;
     aspect-ratio: 1 / 1;
     background-color: var(--color-border);
 }
+
 .grid-item-image img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
+
 .placeholder-image {
     width: 100%;
     height: 100%;
@@ -103,6 +124,7 @@ a:hover {
     font-size: 4rem;
     color: var(--color-text-secondary);
 }
+
 .grid-item-title {
     color: var(--color-text);
     font-weight: bold;
@@ -119,24 +141,25 @@ a:hover {
     gap: 2rem;
     margin-bottom: 3rem;
 }
-@media (min-width: 768px) {
- .entity-header {
-        flex-direction: row;
-    }
-}
+
+
+
 .entity-image {
     width: 250px;
     height: 250px;
     flex-shrink: 0;
     background-color: var(--color-border);
-    border-radius: 50%; /* Circular images */
+    border-radius: 50%;
+    /* Circular images */
     overflow: hidden;
 }
+
 .entity-image img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
+
 .placeholder-image-large {
     width: 100%;
     height: 100%;
@@ -146,25 +169,30 @@ a:hover {
     font-size: 8rem;
     color: var(--color-text-secondary);
 }
+
 .entity-info {
     display: flex;
     flex-direction: column;
 }
+
 .entity-info h1 {
     font-size: 3rem;
     font-weight: bold;
 }
+
 .entity-summary {
     color: var(--color-text-secondary);
     margin-top: 1rem;
     line-height: 1.6;
     /* This fix is preserved */
 }
+
 .entity-controls {
     margin-top: 2rem;
     display: flex;
     gap: 1rem;
 }
+
 .action-button {
     background-color: var(--color-primary);
     color: var(--color-text);
@@ -176,19 +204,45 @@ a:hover {
     cursor: pointer;
     transition: transform 0.1s ease, background-color 0.2s ease;
 }
+
 .action-button:hover {
     transform: scale(1.05);
     background-color: #1ed760;
+}
+
+@media (min-width: 768px) {
+    .entity-header {
+        display: block;
+    }
+
+    .entity-header::after {
+        content: "";
+        display: table;
+        clear: both;
+    }
+
+    .entity-image {
+        float: left;
+        margin-right: 2.5rem;
+        margin-bottom: 1rem;
+        shape-outside: circle(50%);
+    }
+
+    .entity-info {
+        display: block;
+    }
 }
 
 /* Track List */
 .track-list-container {
     margin-top: 2rem;
 }
+
 .track-list {
     list-style: none;
     margin-top: 1rem;
 }
+
 .track-item {
     display: flex;
     align-items: center;
@@ -196,18 +250,22 @@ a:hover {
     border-radius: 4px;
     transition: background-color 0.2s ease;
 }
+
 .track-item:hover {
     background-color: var(--color-surface);
 }
+
 .track-title {
     flex-grow: 1;
     font-size: 1.1rem;
 }
+
 .track-link {
     color: var(--color-text-secondary);
     font-size: 1.2rem;
     margin-left: 1rem;
 }
+
 .track-link:hover {
     color: var(--color-text);
 }
@@ -215,21 +273,23 @@ a:hover {
 /* --- NEW 2-COLUMN LAYOUT --- */
 .page-grid-container {
     display: grid;
-    grid-template-columns: 1fr; /* Default to 1 column on mobile */
+    grid-template-columns: 1fr;
+    /* Default to 1 column on mobile */
     gap: 2rem;
 }
 
 @media (min-width: 900px) {
-   .page-grid-container {
+    .page-grid-container {
         /* On wide screens, 2 columns. 2 parts info, 1 part tracklist */
-        grid-template-columns: 2fr 1fr; 
+        grid-template-columns: 2fr 1fr;
     }
 
     /* Keep the "Works" title aligned with the top of the composer info */
-   .track-list-container {
+    .track-list-container {
         margin-top: 0;
     }
 }
+
 /* --- END NEW 2-COLUMN LAYOUT --- */
 
 
@@ -247,12 +307,14 @@ a:hover {
     align-items: center;
     padding: 0 2rem;
 }
+
 .player-controls {
     display: flex;
     justify-content: flex-start;
     align-items: center;
     gap: 0.5rem;
 }
+
 .player-btn {
     background: none;
     border: none;
@@ -264,18 +326,23 @@ a:hover {
     border-radius: 50%;
     transition: color 0.2s ease, background-color 0.2s;
 }
+
 .player-btn:hover {
     color: var(--color-text);
 }
+
 .player-btn.play-btn {
     font-size: 2rem;
     color: var(--color-text);
 }
+
 .player-btn.play-btn:hover {
     transform: scale(1.1);
 }
+
 .player-btn.active {
-    color: var(--color-primary); /* For shuffle button */
+    color: var(--color-primary);
+    /* For shuffle button */
 }
 
 .now-playing {
@@ -294,6 +361,7 @@ a:hover {
     gap: 0.5rem;
     color: var(--color-text-secondary);
 }
+
 #midi-output-device {
     background-color: var(--color-border);
     color: var(--color-text);
@@ -302,6 +370,7 @@ a:hover {
     padding: 0.5rem;
     max-width: 150px;
 }
+
 /*... all your other styles... */
 
 /* NEW RULE: Add a pointer cursor to clickable tracks */
@@ -354,6 +423,7 @@ a:hover {
     cursor: pointer;
     font-size: 1.2rem;
 }
+
 .close-btn:hover {
     color: var(--color-text);
 }

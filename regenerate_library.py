@@ -24,6 +24,7 @@ import subprocess
 import unicodedata
 import requests
 import wikipedia
+from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
 
 # --- Configuration ---
@@ -213,6 +214,9 @@ class MidiLibraryGenerator:
             loader=FileSystemLoader(self.template_dir),
             autoescape=True
         )
+        
+        # Generate Build ID
+        self.build_id = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     def _setup_output_dirs(self):
         """Creates output directories if they don't exist."""
@@ -488,6 +492,8 @@ class MidiLibraryGenerator:
     def _render_template(self, template_name, context, output_path):
         """Helper to render a single Jinja2 template."""
         template = self.jinja_env.get_template(template_name)
+        # Inject build_id into context
+        context['build_id'] = self.build_id
         html = template.render(context)
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(html)
