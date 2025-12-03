@@ -21,7 +21,6 @@ import re
 import shutil
 import unicodedata
 import requests
-import mido
 import wikipedia
 from jinja2 import Environment, FileSystemLoader
 
@@ -214,18 +213,15 @@ class MidiLibraryGenerator:
         )
 
     def _setup_output_dirs(self):
-        """Creates a clean set of output directories."""
-        logging.info(f"Cleaning output directory: {self.output_dir}")
-        if self.output_dir.exists():
-            shutil.rmtree(self.output_dir)
+        """Creates output directories if they don't exist."""
+        logging.info(f"Ensuring output directories exist at: {self.output_dir}")
         
-        logging.info("Creating output directories...")
-        self.output_dir.mkdir()
-        self.static_dir.mkdir()
-        self.midi_files_dir.mkdir()
-        self.composers_dir.mkdir()
-        self.performers_dir.mkdir()
-        self.files_dir.mkdir()
+        self.output_dir.mkdir(exist_ok=True)
+        self.static_dir.mkdir(exist_ok=True)
+        self.midi_files_dir.mkdir(exist_ok=True)
+        self.composers_dir.mkdir(exist_ok=True)
+        self.performers_dir.mkdir(exist_ok=True)
+        self.files_dir.mkdir(exist_ok=True)
 
     def _copy_static_assets(self):
         """Copies static assets (CSS, JS) from template dir to output dir."""
@@ -238,54 +234,35 @@ class MidiLibraryGenerator:
         """Finds all.mid files in the input directory."""
         logging.info(f"Scanning for MIDI files in {self.input_dir}...")
         files = list(self.input_dir.rglob("*.mid"))
+        files.sort() # Ensure stable order for ID generation
         logging.info(f"Found {len(files)} MIDI files.")
         return files
 
-    def _parse_midi_metadata(self, file_path):
+    def _parse_metadata(self, file_path):
         """
-        Hierarchical metadata parsing for a single MIDI file.
+        Parses metadata from the filename using regex patterns.
         Returns a dict: {'work':..., 'composer':..., 'performer':...}
         """
         metadata = {}
-
-        # --- Step 1: Internal Metadata (mido) ---
-        try:
-            mid = mido.MidiFile(file_path)
-            if mid.tracks:
-                # FIX 1: Iterate messages in the first track [2], not the list of tracks.
-                for msg in mid.tracks: 
-                    if msg.is_meta: # [1]
-                        if msg.type == 'track_name' and 'work' not in metadata:
-                            metadata['work'] = msg.name
-                        # Copyright often has composer info
-                        elif msg.type == 'copyright' and 'composer' not in metadata:
-                            # Simple heuristic
-                            if "by " in msg.text:
-                                metadata['composer'] = msg.text.split("by ")[-1].strip()
-        except Exception as e:
-            logging.warning(f"Could not parse internal metadata for {file_path.name}: {e}")
-
-        # --- Step 2: Filename Parsing (Regex) ---
         filename_stem = file_path.stem
         
-        # If we still need data, try regex
-        if 'work' not in metadata or 'composer' not in metadata:
-            for pattern in FILENAME_REGEX_PATTERNS:
-                match = pattern.match(filename_stem)
-                if match:
-                    match_dict = match.groupdict()
-                    if 'work' not in metadata and 'work' in match_dict:
-                        metadata['work'] = match_dict['work'].strip()
-                    if 'composer' not in metadata and 'composer' in match_dict:
-                        metadata['composer'] = match_dict['composer'].strip()
-                    if 'performer' not in metadata and 'performer' in match_dict:
-                        metadata['performer'] = match_dict['performer'].strip()
-                    
-                    # If we got the essentials, stop
-                    if 'work' in metadata and 'composer' in metadata:
-                        break
+        # Try regex patterns
+        for pattern in FILENAME_REGEX_PATTERNS:
+            match = pattern.match(filename_stem)
+            if match:
+                match_dict = match.groupdict()
+                if 'work' not in metadata and 'work' in match_dict:
+                    metadata['work'] = match_dict['work'].strip()
+                if 'composer' not in metadata and 'composer' in match_dict:
+                    metadata['composer'] = match_dict['composer'].strip()
+                if 'performer' not in metadata and 'performer' in match_dict:
+                    metadata['performer'] = match_dict['performer'].strip()
+                
+                # If we got the essentials, stop
+                if 'work' in metadata and 'composer' in metadata:
+                    break
         
-        # --- Step 3: Fallbacks ---
+        # Fallbacks
         if 'work' not in metadata:
             metadata['work'] = filename_stem # Use the filename as a last resort
         if 'composer' not in metadata:
@@ -295,6 +272,30 @@ class MidiLibraryGenerator:
 
         logging.info(f"For {file_path.name} got: {metadata}")
         return metadata
+
+    def _smart_copy(self, src, dst):
+        """
+        Copies src to dst only if dst doesn't exist or is different.
+        Checks file size and modification time.
+        """
+        if not dst.exists():
+            shutil.copy2(src, dst) # copy2 preserves metadata
+            return True
+        
+        src_stat = src.stat()
+        dst_stat = dst.stat()
+        
+        # Check size
+        if src_stat.st_size != dst_stat.st_size:
+            shutil.copy2(src, dst)
+            return True
+            
+        # Check mtime (if src is newer than dst)
+        if src_stat.st_mtime > dst_stat.st_mtime:
+            shutil.copy2(src, dst)
+            return True
+            
+        return False
 
     def build_data_model(self):
         """
@@ -319,7 +320,7 @@ class MidiLibraryGenerator:
             logging.info(f"Processing {file_id}: {file_path.name}")
             
             # 1. Parse metadata
-            metadata = self._parse_midi_metadata(file_path)
+            metadata = self._parse_metadata(file_path)
             
             # 2. Get/Create Composer
             composer_name = metadata['composer']
@@ -349,9 +350,12 @@ class MidiLibraryGenerator:
                 }
             model['performers'][performer_slug]['works'].append(file_id)
 
-            # 4. Copy MIDI file to output
+            # 4. Copy MIDI file to output (Smart Copy)
             output_midi_path = self.midi_files_dir / f"{file_id}.mid"
-            shutil.copy(file_path, output_midi_path)
+            if self._smart_copy(file_path, output_midi_path):
+                logging.info(f"Copied/Updated: {file_path.name} -> {output_midi_path.name}")
+            else:
+                logging.debug(f"Skipped (unchanged): {file_path.name}")
 
             # 5. Add File entry
             model['files'][file_id] = {
@@ -364,8 +368,18 @@ class MidiLibraryGenerator:
             }
 
         logging.info("Data model built. Generating playlists...")
+        
+        # 6. Cleanup Orphaned Files
+        generated_files = set(f"{fid}.mid" for fid in model['files'].keys())
+        existing_files = set(f.name for f in self.midi_files_dir.glob("*.mid"))
+        orphaned_files = existing_files - generated_files
+        
+        if orphaned_files:
+            logging.info(f"Removing {len(orphaned_files)} orphaned files from output...")
+            for filename in orphaned_files:
+                (self.midi_files_dir / filename).unlink()
 
-        # 6. Generate Playlists
+        # 7. Generate Playlists
         for slug, composer in model['composers'].items():
             playlist_key = f"composer-{slug}"
             model['playlists'][playlist_key] = [
