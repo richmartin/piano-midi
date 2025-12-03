@@ -13,12 +13,14 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import logging
 import os
 import pathlib
 import re
 import shutil
+import subprocess
 import unicodedata
 import requests
 import wikipedia
@@ -273,6 +275,74 @@ class MidiLibraryGenerator:
         logging.info(f"For {file_path.name} got: {metadata}")
         return metadata
 
+    def _extract_pianists_from_pdfs(self):
+        """Scans input_dir for PDFs, converts to text, and extracts pianist info."""
+        mapping = {}
+        pdfs = list(self.input_dir.glob("*.pdf"))
+        if not pdfs:
+            logging.info("No PDF files found in input directory for pianist extraction.")
+            return mapping
+
+        logging.info(f"Found {len(pdfs)} PDF files. Extracting pianist data...")
+        
+        # Regex to find "Name (YYYY-YYYY)" lines
+        pattern = re.compile(r'^(.+?)\s+\((\d{4}-\d{4})\)\s*$')
+
+        for pdf_file in pdfs:
+            try:
+                # Convert PDF to text using pdftotext
+                result = subprocess.run(
+                    ['pdftotext', '-layout', str(pdf_file), '-'], 
+                    capture_output=True, 
+                    text=True, 
+                    check=True
+                )
+                content = result.stdout
+                
+                for line in content.splitlines():
+                    line = line.strip()
+                    match = pattern.match(line)
+                    if match:
+                        full_name = match.group(1).strip()
+                        dates = match.group(2).strip()
+                        display_name = f"{full_name} ({dates})"
+                        
+                        # Heuristic for Short Name
+                        parts = full_name.split()
+                        last_name = parts[-1]
+                        
+                        if len(parts) > 1 and parts[-2].lower() == "d'albert":
+                             last_name = "d'Albert"
+                        elif len(parts) > 1 and parts[-2].lower() == "von":
+                            last_name = f"von {last_name}"
+
+                        short_slug = slugify(last_name)
+                        if short_slug not in mapping:
+                            mapping[short_slug] = display_name
+                        
+                        if "d'albert" in full_name.lower():
+                             mapping["dalbert"] = display_name
+
+            except subprocess.CalledProcessError as e:
+                logging.error(f"Failed to convert {pdf_file}: {e}")
+            except Exception as e:
+                logging.error(f"Error extracting from {pdf_file}: {e}")
+        
+        logging.info(f"Extracted {len(mapping)} pianists from PDFs.")
+        return mapping
+
+    def _load_pianist_mapping(self):
+        """Loads the pianist mapping from CSV if it exists."""
+        mapping = {}
+        csv_path = self.input_dir / "pianists.csv"
+        if csv_path.exists():
+            logging.info(f"Loading pianist mapping from {csv_path}")
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    mapping[row['Slug']] = row['DisplayName']
+        return mapping
+
     def _smart_copy(self, src, dst):
         """
         Copies src to dst only if dst doesn't exist or is different.
@@ -307,6 +377,13 @@ class MidiLibraryGenerator:
         
         logging.info("Building data model...")
         midi_files = self._find_midi_files()
+        
+        # Load mappings from CSV and PDFs
+        csv_mapping = self._load_pianist_mapping()
+        pdf_mapping = self._extract_pianists_from_pdfs()
+        
+        # Merge mappings (PDFs take precedence)
+        pianist_mapping = {**csv_mapping, **pdf_mapping}
 
         model = {
             "composers": {},
@@ -339,6 +416,11 @@ class MidiLibraryGenerator:
             # 3. Get/Create Performer
             performer_name = metadata['performer']
             performer_slug = slugify(performer_name)
+            
+            # Use full name from mapping if available
+            if performer_slug in pianist_mapping:
+                performer_name = pianist_mapping[performer_slug]
+            
             if performer_slug not in model['performers']:
                 wiki_data = self.wiki_client.get_entity_data(performer_name, "performer")
                 model['performers'][performer_slug] = {
