@@ -7,6 +7,8 @@ class SoundFontOutput {
         this.context = new (window.AudioContext || window.webkitAudioContext)();
         this.piano = new SplendidGrandPiano(this.context);
         this.activeNotes = new Map(); // Store stop functions
+        this.sustainedNotes = new Map(); // Store stop functions for sustained notes
+        this.sustain = false;
         console.log("Initializing Salamander Grand Piano...");
 
         // Preload some samples (optional but good for responsiveness)
@@ -31,8 +33,45 @@ class SoundFontOutput {
     sendNoteOff(note) {
         const stopFn = this.activeNotes.get(note);
         if (stopFn) {
-            stopFn(); // This triggers the release sample/envelope
-            this.activeNotes.delete(note);
+            if (this.sustain) {
+                // Move to sustained notes
+                this.sustainedNotes.set(note, stopFn);
+                this.activeNotes.delete(note);
+            } else {
+                stopFn(); // This triggers the release sample/envelope
+                this.activeNotes.delete(note);
+            }
+        }
+    }
+
+    sendControlChange(controller, value) {
+        if (controller === 64) {
+            if (value >= 64) {
+                this.sustain = true;
+            } else {
+                this.sustain = false;
+                // Release all sustained notes
+                this.sustainedNotes.forEach(stopFn => stopFn());
+                this.sustainedNotes.clear();
+            }
+        }
+    }
+
+    stopAll() {
+        this.sustain = false;
+        this.activeNotes.forEach(stopFn => {
+            try { stopFn(); } catch (e) { console.warn("Error stopping note:", e); }
+        });
+        this.activeNotes.clear();
+        this.sustainedNotes.forEach(stopFn => {
+            try { stopFn(); } catch (e) { console.warn("Error stopping sustained note:", e); }
+        });
+        this.sustainedNotes.clear();
+
+        // If the piano has a global stop, use it (smplr doesn't seem to expose one directly on the instance easily, 
+        // but we've handled individual notes).
+        if (this.piano && this.piano.stop) {
+            try { this.piano.stop(); } catch (e) { }
         }
     }
 }
@@ -68,6 +107,17 @@ class MidiPlayer {
                     name: note.name
                 });
             });
+            // Add Control Changes (specifically Sustain)
+            if (track.controlChanges && track.controlChanges[64]) {
+                track.controlChanges[64].forEach(cc => {
+                    this.events.push({
+                        type: "controlchange",
+                        time: cc.time,
+                        controller: 64,
+                        value: Math.floor(cc.value * 127)
+                    });
+                });
+            }
         });
         this.events.sort((a, b) => a.time - b.time);
         this.playhead = 0;
@@ -90,7 +140,27 @@ class MidiPlayer {
     pause() {
         if (!this.playing) return;
         this.playing = false;
-        this.currentlyPlaying.forEach(n => this.output.sendNoteOff(n));
+
+        if (this.output) {
+            if (typeof this.output.stopAll === 'function') {
+                this.output.stopAll();
+            } else {
+                // External MIDI or generic output
+                this.currentlyPlaying.forEach(n => {
+                    if (this.output.sendNoteOff) this.output.sendNoteOff(n);
+                });
+
+                // Send All Notes Off (CC 123) and Sustain Off (CC 64)
+                if (this.output.sendControlChange) {
+                    try {
+                        this.output.sendControlChange(64, 0); // Sustain Off
+                        this.output.sendControlChange(123, 0); // All Notes Off
+                    } catch (e) {
+                        console.warn("Error sending MIDI panic:", e);
+                    }
+                }
+            }
+        }
         this.currentlyPlaying.clear();
         this.playhead = (performance.now() - this.startTime) / 1000;
     }
@@ -101,7 +171,24 @@ class MidiPlayer {
     }
 
     jumpTo(time) {
-        this.currentlyPlaying.forEach(n => this.output.sendNoteOff(n));
+        if (this.output) {
+            if (typeof this.output.stopAll === 'function') {
+                this.output.stopAll();
+            } else {
+                this.currentlyPlaying.forEach(n => {
+                    if (this.output.sendNoteOff) this.output.sendNoteOff(n);
+                });
+                // Send All Notes Off (CC 123) and Sustain Off (CC 64)
+                if (this.output.sendControlChange) {
+                    try {
+                        this.output.sendControlChange(64, 0); // Sustain Off
+                        this.output.sendControlChange(123, 0); // All Notes Off
+                    } catch (e) {
+                        console.warn("Error sending MIDI panic:", e);
+                    }
+                }
+            }
+        }
         this.currentlyPlaying.clear();
         this.playhead = time;
         this.nextEventIndex = this.events.findIndex(e => e.time >= time);
@@ -128,6 +215,10 @@ class MidiPlayer {
                 this.currentlyPlaying.delete(e.name);
                 if (this.output.sendNoteOff)
                     this.output.sendNoteOff(e.name);
+            } else if (e.type === "controlchange") {
+                if (this.output.sendControlChange) {
+                    this.output.sendControlChange(e.controller, e.value);
+                }
             }
             this.nextEventIndex++;
         }
