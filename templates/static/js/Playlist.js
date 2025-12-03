@@ -17,6 +17,7 @@ class Playlist {
 
         // UI Elements
         this.playPauseBtn = document.getElementById('play-pause-button');
+        this.stopBtn = document.getElementById('stop-button');
         this.nextBtn = document.getElementById('next-button');
         this.prevBtn = document.getElementById('prev-button');
         this.shuffleBtn = document.getElementById('shuffle-button');
@@ -44,6 +45,7 @@ class Playlist {
 
     bindEvents() {
         this.playPauseBtn.addEventListener('click', () => this.togglePlayPause());
+        this.stopBtn.addEventListener('click', () => this.stop());
         this.nextBtn.addEventListener('click', () => this.next());
         this.prevBtn.addEventListener('click', () => this.previous());
         this.shuffleBtn.addEventListener('click', () => this.toggleShuffle());
@@ -131,15 +133,46 @@ class Playlist {
         const track = this.tracks[this.currentIndex];
         this.nowPlayingTitle.textContent = track.title;
 
-        this.midiController.player.loadUrl(track.url).then(() => {
+        // If we are already playing this track (paused), just resume
+        // We can check if the player has events loaded, but simpler is to trust the player state
+        // if we didn't change tracks.
+        // However, MidiPlayer doesn't expose "currentUrl".
+        // But since we control the player, we can just call play() and if it's paused it resumes.
+        // The only issue is if we changed tracks.
+
+        // Let's rely on the player's internal state.
+        // If the player is paused, play() resumes.
+        // But we need to know if we need to load a NEW url.
+        // We can check if the player is currently playing something else?
+        // Actually, MidiPlayer.play() resumes if paused.
+        // But we need to know if we should loadUrl() or just play().
+
+        // Let's add a simple check:
+        // If we are resuming, we don't want to reload.
+        // But how do we know if we are resuming the SAME track?
+        // We can store the last loaded URL in the playlist.
+
+        if (this.lastLoadedUrl === track.url) {
             this.midiController.player.play();
-        });
+        } else {
+            this.midiController.player.loadUrl(track.url).then(() => {
+                this.lastLoadedUrl = track.url;
+                this.midiController.player.play();
+            });
+        }
     }
 
     pause() {
         this.isPlaying = false;
         this.midiController.player.pause();
         this.updatePlayButton(false);
+    }
+
+    stop() {
+        this.isPlaying = false;
+        this.midiController.player.stop();
+        this.updatePlayButton(false);
+        // We don't reset currentIndex, just the playback position
     }
 
     togglePlayPause() {
