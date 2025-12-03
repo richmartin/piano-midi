@@ -39,20 +39,21 @@
                 {% for file_id in composer.works %}
                 {% set file = model.files[file_id] %}
                 <li class="track-item">
-                    <div class="track-info">
-                        <span class="track-title">{{ file.title }}</span>
-                        <a href="{{ file.page_url | urlencode }}" class="track-link"><i
-                                class="fas fa-info-circle"></i></a>
-                    </div>
                     <div class="track-controls">
-                        <button class="queue-btn play-now-btn" data-track-url="{{ file.midi_url | urlencode }}"
-                            data-track-title="{{ file.title }}" title="Play Now">
-                            <i class="fas fa-play"></i>
+                        <button class="queue-btn play-now-btn minimal-btn"
+                            data-track-url="{{ file.midi_url | urlencode }}" data-track-title="{{ file.title }}"
+                            title="Play Now">
+                            ▶
                         </button>
-                        <button class="queue-btn add-queue-btn" data-track-url="{{ file.midi_url | urlencode }}"
-                            data-track-title="{{ file.title }}" title="Add to Queue">
-                            <i class="fas fa-list-ul"></i>
+                        <button class="queue-btn add-queue-btn minimal-btn"
+                            data-track-url="{{ file.midi_url | urlencode }}" data-track-title="{{ file.title }}"
+                            title="Add to Queue">
+                            +
                         </button>
+                    </div>
+                    <div class="track-info">
+                        <div class="track-title">{{ file.title }}</div>
+                        <div class="track-performer">{{ model.performers[file.performer_slug].name }}</div>
                     </div>
                 </li>
                 {% endfor %}
