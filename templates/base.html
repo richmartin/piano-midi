@@ -20,7 +20,7 @@
     </main>
 
     <footer class="site-footer">
-        <p>Build: {{ build_id }}</p>
+        <p>Build: <span id="build-number-display">{{ build_id }}</span></p>
     </footer>
 
     <footer class="player-bar">
@@ -61,6 +61,7 @@
     <script type="module" src="{{ '/static/js/midi.2.0.28.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/Navigation.js' | urlencode }}"></script>
     <script src="{{ '/static/js/Playlist.js' | urlencode }}"></script>
+    <script type="module" src="{{ '/static/js/TestMode.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/App.js' | urlencode }}"></script>
 
     {% block scripts %}{% endblock %}

@@ -15,16 +15,21 @@ class SoundFontOutput {
         // The library handles loading on demand, but we can trigger it early.
     }
 
-    sendNoteOn(note, { velocity = 100 } = {}) {
+    sendNoteOn(note, { velocity = 100, attack } = {}) {
         // smplr expects velocity 0-127
         // note can be "C4", etc.
 
         // Stop existing note if playing (re-trigger)
         this.sendNoteOff(note);
 
+        let finalVelocity = velocity;
+        if (attack !== undefined && attack !== null) {
+            finalVelocity = Math.floor(attack * 127);
+        }
+
         const stopFn = this.piano.start({
             note: note,
-            velocity: velocity
+            velocity: finalVelocity
         });
 
         this.activeNotes.set(note, stopFn);
@@ -99,7 +104,8 @@ class MidiPlayer {
                     type: "noteon",
                     time: note.time,
                     name: note.name,
-                    velocity: Math.floor(note.velocity * 127)
+                    velocity: Math.floor(note.velocity * 127),
+                    duration: note.duration
                 });
                 this.events.push({
                     type: "noteoff",
@@ -108,14 +114,18 @@ class MidiPlayer {
                 });
             });
             // Add Control Changes (specifically Sustain)
-            if (track.controlChanges && track.controlChanges[64]) {
-                track.controlChanges[64].forEach(cc => {
-                    this.events.push({
-                        type: "controlchange",
-                        time: cc.time,
-                        controller: 64,
-                        value: Math.floor(cc.value * 127)
-                    });
+            if (track.controlChanges) {
+                Object.keys(track.controlChanges).forEach(ccNum => {
+                    if (parseInt(ccNum) === 64) {
+                        track.controlChanges[ccNum].forEach(cc => {
+                            this.events.push({
+                                type: "controlchange",
+                                time: cc.time,
+                                controller: 64,
+                                value: Math.floor(cc.value * 127)
+                            });
+                        });
+                    }
                 });
             }
         });
@@ -211,6 +221,7 @@ class MidiPlayer {
                     // this.output.sendNoteOn(e.name, { velocity: e.velocity });
                     this.output.sendNoteOn(e.name, { attack: e.velocity / 127 });
                 }
+                document.dispatchEvent(new CustomEvent('midi:noteOn', { detail: e }));
             } else if (e.type === "noteoff") {
                 this.currentlyPlaying.delete(e.name);
                 if (this.output.sendNoteOff)
@@ -219,6 +230,7 @@ class MidiPlayer {
                 if (this.output.sendControlChange) {
                     this.output.sendControlChange(e.controller, e.value);
                 }
+                document.dispatchEvent(new CustomEvent('midi:controlChange', { detail: e }));
             }
             this.nextEventIndex++;
         }
@@ -347,6 +359,7 @@ class MidiController {
 }
 
 import { Navigation } from './Navigation.js';
+import { TestMode } from './TestMode.js';
 
 /**
  * App.js
@@ -360,6 +373,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const midiController = new MidiController('midi-output-device');
     midiController.init();
+
+    const testMode = new TestMode(midiController);
+    testMode.init();
 
     const playlist = new Playlist(midiController);
     playlist.bindEvents();
