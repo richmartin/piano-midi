@@ -112,6 +112,11 @@ class MidiPlayer {
         this.currentlyPlaying = new Set();
         this.startTime = 0;
         this.nextEventIndex = 0;
+        this.volume = 11; // 1-11
+    }
+
+    setVolume(v) {
+        this.volume = Math.max(1, Math.min(11, v));
     }
 
     async loadArrayBuffer(arrayBuffer) {
@@ -240,10 +245,16 @@ class MidiPlayer {
             if (e.type === "noteon") {
                 this.currentlyPlaying.add(e.name);
 
+                // Apply Volume Scaling
+                // Volume 1-11. Factor = (v-1)/10.
+                // v=1 -> 0, v=11 -> 1.
+                const volumeFactor = (this.volume - 1) / 10;
+                const scaledVelocity = e.velocity * volumeFactor;
+
                 // Support SoundFontOutput
                 if (this.output.piano && this.output.sendNoteOn) {
                     this.output.sendNoteOn(e.name, {
-                        attack: e.velocity / 127,
+                        attack: scaledVelocity / 127,
                         time: delaySeconds,
                         duration: e.duration
                     });
@@ -253,13 +264,13 @@ class MidiPlayer {
                     const absoluteTime = WebMidi.time + delayMs;
                     this.output.playNote(e.name, {
                         channels: e.channel || 1,
-                        velocity: e.velocity / 127,
+                        velocity: scaledVelocity / 127,
                         time: absoluteTime,
                         duration: e.duration ? e.duration * 1000 : undefined
                     });
                 }
 
-                document.dispatchEvent(new CustomEvent('midi:noteOn', { detail: e }));
+                document.dispatchEvent(new CustomEvent('midi:noteOn', { detail: { ...e, velocity: scaledVelocity } }));
             } else if (e.type === "noteoff") {
                 this.currentlyPlaying.delete(e.name);
 
@@ -305,6 +316,7 @@ class MidiPlayer {
 class MidiController {
     constructor(outputSelectElementId) {
         this.outputSelect = document.getElementById(outputSelectElementId);
+        this.volumeSlider = document.getElementById('midi-volume');
         this.selectedOutput = null;
         this.player = null;
     }
@@ -335,7 +347,20 @@ class MidiController {
                 console.log("MIDI Output changed to:", this.selectedOutput?.name);
                 this.player.stop();
                 this.player = new MidiPlayer(this.selectedOutput);
+                if (this.volumeSlider) {
+                    this.player.setVolume(parseInt(this.volumeSlider.value));
+                }
             });
+
+            // Listen for volume changes
+            if (this.volumeSlider) {
+                this.volumeSlider.addEventListener('input', (e) => {
+                    const v = parseInt(e.target.value);
+                    if (this.player) {
+                        this.player.setVolume(v);
+                    }
+                });
+            }
 
         } catch (err) {
             console.error("Could not enable WebMidi.", err);
@@ -343,6 +368,9 @@ class MidiController {
         }
         if (this.selectedOutput) {
             this.player = new MidiPlayer(this.selectedOutput);
+            if (this.volumeSlider) {
+                this.player.setVolume(parseInt(this.volumeSlider.value));
+            }
         }
     }
 

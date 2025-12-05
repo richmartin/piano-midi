@@ -412,6 +412,28 @@ a:hover {
     max-width: 150px;
 }
 
+.midi-settings select {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    padding: 0.3rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    max-width: 200px;
+}
+
+.volume-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-right: 1rem;
+}
+
+#midi-volume {
+    width: 80px;
+    cursor: pointer;
+}
+
 /*... all your other styles... */
 
 /* NEW RULE: Add a pointer cursor to clickable tracks */
