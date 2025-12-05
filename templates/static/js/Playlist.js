@@ -41,6 +41,13 @@ class Playlist {
 
         // Listen for the track ended event from MidiControl
         document.addEventListener('midi:trackEnded', () => this.handleTrackEnd());
+
+        // Listen for Test Mode opening to pause playback
+        document.addEventListener('test:mode:opened', () => {
+            if (this.isPlaying) {
+                this.pause();
+            }
+        });
     }
 
     bindEvents() {

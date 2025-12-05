@@ -124,6 +124,7 @@ export class TestMode {
 
     openModal() {
         if (this.modal) this.modal.classList.remove('hidden');
+        document.dispatchEvent(new Event('test:mode:opened'));
     }
 
     closeModal() {
@@ -153,7 +154,7 @@ export class TestMode {
                 midi: i,
                 time: time,
                 duration: duration,
-                velocity: 0.8
+                velocity: 0.2
             });
             time += duration;
         }

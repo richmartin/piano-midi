@@ -15,27 +15,34 @@ class SoundFontOutput {
         // The library handles loading on demand, but we can trigger it early.
     }
 
-    sendNoteOn(note, { velocity = 100, attack } = {}) {
+    sendNoteOn(note, { velocity = 100, attack, time = 0, duration } = {}) {
         // smplr expects velocity 0-127
         // note can be "C4", etc.
 
         // Stop existing note if playing (re-trigger)
-        this.sendNoteOff(note);
+        this.sendNoteOff(note, { time });
 
         let finalVelocity = velocity;
         if (attack !== undefined && attack !== null) {
             finalVelocity = Math.floor(attack * 127);
         }
 
+        const startTime = this.context.currentTime + time;
+
         const stopFn = this.piano.start({
             note: note,
-            velocity: finalVelocity
+            velocity: finalVelocity,
+            time: startTime,
+            duration: duration // If provided, smplr handles the stop
         });
 
-        this.activeNotes.set(note, stopFn);
+        // Only track for manual stopping if no duration was provided
+        if (!duration) {
+            this.activeNotes.set(note, stopFn);
+        }
     }
 
-    sendNoteOff(note) {
+    sendNoteOff(note, { time = 0 } = {}) {
         const stopFn = this.activeNotes.get(note);
         if (stopFn) {
             if (this.sustain) {
@@ -43,23 +50,35 @@ class SoundFontOutput {
                 this.sustainedNotes.set(note, stopFn);
                 this.activeNotes.delete(note);
             } else {
-                stopFn(); // This triggers the release sample/envelope
+                // Schedule stop if possible, otherwise rely on immediate stop
+                // smplr stop functions usually stop immediately. 
+                // We can use setTimeout for rough scheduling if needed, 
+                // but if we used duration in NoteOn, this might not be called or needed.
+                if (time > 0) {
+                    setTimeout(() => stopFn(), time * 1000);
+                } else {
+                    stopFn();
+                }
                 this.activeNotes.delete(note);
             }
         }
     }
 
-    sendControlChange(controller, value) {
-        if (controller === 64) {
-            if (value >= 64) {
-                this.sustain = true;
-            } else {
-                this.sustain = false;
-                // Release all sustained notes
-                this.sustainedNotes.forEach(stopFn => stopFn());
-                this.sustainedNotes.clear();
+    sendControlChange(controller, value, { time = 0 } = {}) {
+        // Schedule CC changes? 
+        // For sustain, we can use setTimeout to update the state at the right time.
+        setTimeout(() => {
+            if (controller === 64) {
+                if (value >= 64) {
+                    this.sustain = true;
+                } else {
+                    this.sustain = false;
+                    // Release all sustained notes
+                    this.sustainedNotes.forEach(stopFn => stopFn());
+                    this.sustainedNotes.clear();
+                }
             }
-        }
+        }, time * 1000);
     }
 
     stopAll() {
@@ -214,22 +233,62 @@ class MidiPlayer {
             this.events[this.nextEventIndex].time < elapsed + this.scheduleAhead / 1000
         ) {
             const e = this.events[this.nextEventIndex];
-            const delay = e.time * 1000 + this.startTime - now;
+            // Calculate precise delay in seconds
+            const delayMs = e.time * 1000 + this.startTime - now;
+            const delaySeconds = Math.max(0, delayMs / 1000);
+
             if (e.type === "noteon") {
                 this.currentlyPlaying.add(e.name);
-                if (this.output.sendNoteOn) {
-                    // this.output.sendNoteOn(e.name, { velocity: e.velocity });
-                    this.output.sendNoteOn(e.name, { attack: e.velocity / 127 });
+
+                // Support SoundFontOutput
+                if (this.output.piano && this.output.sendNoteOn) {
+                    this.output.sendNoteOn(e.name, {
+                        attack: e.velocity / 127,
+                        time: delaySeconds,
+                        duration: e.duration
+                    });
                 }
+                // Support WebMidi.js Output
+                else if (this.output.playNote) {
+                    const absoluteTime = WebMidi.time + delayMs;
+                    this.output.playNote(e.name, {
+                        channels: e.channel || 1,
+                        velocity: e.velocity / 127,
+                        time: absoluteTime,
+                        duration: e.duration ? e.duration * 1000 : undefined
+                    });
+                }
+
                 document.dispatchEvent(new CustomEvent('midi:noteOn', { detail: e }));
             } else if (e.type === "noteoff") {
                 this.currentlyPlaying.delete(e.name);
-                if (this.output.sendNoteOff)
-                    this.output.sendNoteOff(e.name);
-            } else if (e.type === "controlchange") {
-                if (this.output.sendControlChange) {
-                    this.output.sendControlChange(e.controller, e.value);
+
+                if (this.output.piano && this.output.sendNoteOff) {
+                    this.output.sendNoteOff(e.name, { time: delaySeconds });
                 }
+                else if (this.output.stopNote) {
+                    // WebMidi.js
+                    const absoluteTime = WebMidi.time + delayMs;
+                    this.output.stopNote(e.name, {
+                        channels: e.channel || 1,
+                        time: absoluteTime
+                    });
+                }
+
+            } else if (e.type === "controlchange") {
+                // SoundFontOutput
+                if (this.output.piano && this.output.sendControlChange) {
+                    this.output.sendControlChange(e.controller, e.value, { time: delaySeconds });
+                }
+                // WebMidi.js
+                else if (this.output.sendControlChange) {
+                    const absoluteTime = WebMidi.time + delayMs;
+                    this.output.sendControlChange(e.controller, e.value, {
+                        channels: e.channel || 1,
+                        time: absoluteTime
+                    });
+                }
+
                 document.dispatchEvent(new CustomEvent('midi:controlChange', { detail: e }));
             }
             this.nextEventIndex++;
