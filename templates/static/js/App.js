@@ -181,7 +181,12 @@ class MidiPlayer {
             } else {
                 // External MIDI or generic output
                 this.currentlyPlaying.forEach(n => {
-                    if (this.output.sendNoteOff) this.output.sendNoteOff(n);
+                    if (this.output.stopNote) {
+                        // WebMidi.js
+                        try { this.output.stopNote(n); } catch (e) { }
+                    } else if (this.output.sendNoteOff) {
+                        this.output.sendNoteOff(n);
+                    }
                 });
 
                 // Send All Notes Off (CC 123) and Sustain Off (CC 64)
@@ -210,7 +215,12 @@ class MidiPlayer {
                 this.output.stopAll();
             } else {
                 this.currentlyPlaying.forEach(n => {
-                    if (this.output.sendNoteOff) this.output.sendNoteOff(n);
+                    if (this.output.stopNote) {
+                        // WebMidi.js
+                        try { this.output.stopNote(n); } catch (e) { }
+                    } else if (this.output.sendNoteOff) {
+                        this.output.sendNoteOff(n);
+                    }
                 });
                 // Send All Notes Off (CC 123) and Sustain Off (CC 64)
                 if (this.output.sendControlChange) {
