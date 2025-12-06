@@ -96,6 +96,10 @@ class Playlist {
         }
     }
 
+    setQueue(tracks) {
+        this.load(tracks, false);
+    }
+
     addToQueue(tracks) {
         if (!tracks || tracks.length === 0) return;
         this.tracks.push(...tracks);

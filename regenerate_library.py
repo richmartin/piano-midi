@@ -544,6 +544,42 @@ class MidiLibraryGenerator:
                 self.files_dir / f"{file_id}.html"
             )
         
+        # 5. Render Remote Control Page
+        self._render_template(
+            "remote.html",
+            {"model": model},
+            self.output_dir / "remote.html"
+        )
+
+        # 6. Generate Library JSON for Remote
+        library_data = {
+            "composers": []
+        }
+        
+        # Sort composers by name
+        sorted_composers = sorted(model['composers'].values(), key=lambda x: x['name'])
+        
+        for comp in sorted_composers:
+            comp_entry = {
+                "name": comp['name'],
+                "slug": comp['slug'],
+                "works": []
+            }
+            # Get works for this composer
+            for file_id in comp['works']:
+                file_data = model['files'][file_id]
+                comp_entry['works'].append({
+                    "id": file_id,
+                    "title": file_data['title'],
+                    "url": file_data['midi_url']
+                })
+            # Sort works by title
+            comp_entry['works'].sort(key=lambda x: x['title'])
+            library_data['composers'].append(comp_entry)
+
+        with open(self.output_dir / "library.json", 'w', encoding='utf-8') as f:
+            json.dump(library_data, f)
+
         logging.info("Site generation complete.")
 
 

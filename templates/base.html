@@ -36,6 +36,8 @@
             <div class="next-up">Next: <span id="next-up-title">---</span></div>
         </div>
         <div class="midi-settings">
+            <button id="remote-toggle-btn" class="player-btn" title="Remote Control"><i
+                    class="fas fa-mobile-alt"></i></button>
             <button id="playlist-toggle-btn" class="player-btn" title="Toggle Playlist"><i
                     class="fas fa-list"></i></button>
             <div class="volume-control">
@@ -59,13 +61,27 @@
         </ul>
     </div>
 
+    <div id="remote-modal" class="modal hidden">
+        <div class="modal-content">
+            <span id="remote-close-btn" class="close-btn">&times;</span>
+            <h2>Remote Control</h2>
+            <p>Scan this QR code with your phone to control the player.</p>
+            <div id="qrcode" class="qrcode-container"></div>
+            <p class="remote-link-text">Or visit: <a id="remote-link" href="#" target="_blank">...</a></p>
+            <p class="status-text" id="remote-status">Waiting for connection...</p>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/webmidi@latest/dist/iife/webmidi.iife.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
     <script type="module" src="{{ '/static/js/webmidi.3.1.8.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/midi.2.0.28.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/Navigation.js' | urlencode }}"></script>
     <script src="{{ '/static/js/Playlist.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/TestMode.js' | urlencode }}"></script>
+    <script type="module" src="{{ '/static/js/RemoteHost.js' | urlencode }}"></script>
     <script type="module" src="{{ '/static/js/App.js' | urlencode }}"></script>
 
     {% block scripts %}{% endblock %}

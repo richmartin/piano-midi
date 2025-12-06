@@ -457,6 +457,7 @@ class MidiController {
 
 import { Navigation } from './Navigation.js';
 import { TestMode } from './TestMode.js';
+import { RemoteHost } from './RemoteHost.js';
 
 /**
  * App.js
@@ -476,6 +477,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const playlist = new Playlist(midiController);
     playlist.bindEvents();
+
+    // Initialize Remote Host
+    const remoteHost = new RemoteHost(playlist, midiController.player);
+    remoteHost.init();
 
     // Initialize Navigation
     const nav = new Navigation();

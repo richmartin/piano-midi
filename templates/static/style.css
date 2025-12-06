@@ -615,3 +615,58 @@ a:hover {
 .log-entry {
     margin-bottom: 2px;
 }
+
+/* Remote Control Modal */
+#remote-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+#remote-modal.hidden {
+    display: none;
+}
+
+#remote-modal .modal-content {
+    background-color: var(--color-surface);
+    padding: 2rem;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 400px;
+    border: 1px solid var(--color-border);
+    text-align: center;
+    position: relative;
+}
+
+.qrcode-container {
+    display: flex;
+    justify-content: center;
+    margin: 20px 0;
+    padding: 10px;
+    background: white;
+    /* QR code needs white background */
+    border-radius: 8px;
+}
+
+.remote-link-text {
+    font-size: 0.8rem;
+    word-break: break-all;
+    margin-top: 10px;
+}
+
+.remote-link-text a {
+    color: var(--color-accent);
+}
+
+#remote-status {
+    margin-top: 15px;
+    font-weight: bold;
+    color: #888;
+}
