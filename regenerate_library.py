@@ -52,6 +52,40 @@ FILENAME_REGEX_PATTERNS = [
 # MediaWiki API endpoint for robust image fetching
 WIKI_API_ENDPOINT = "https://en.wikipedia.org/w/api.php"
 
+# Composer Aliases and Multi-Composer Mappings
+COMPOSER_ALIASES = {
+    # Multi-Composer
+    "Liszt-Busoni": ["Franz Liszt", "Ferruccio Busoni"],
+    "Bach-Busoni": ["Johann Sebastian Bach", "Ferruccio Busoni"],
+    "Bach-Liszt": ["Johann Sebastian Bach", "Franz Liszt"],
+    "Mozart-Volodos": ["Wolfgang Amadeus Mozart", "Arcadi Volodos"],
+    "Schubert-Liszt": ["Franz Schubert", "Franz Liszt"],
+    
+    # Abbreviations / Normalization
+    "Bthvn": ["Ludwig van Beethoven"],
+    "Beethoven": ["Ludwig van Beethoven"],
+    "Mozart": ["Wolfgang Amadeus Mozart"],
+    "Bach": ["Johann Sebastian Bach"],
+    "Chopin": ["Frédéric Chopin"],
+    "Liszt": ["Franz Liszt"],
+    "Rachmaninoff": ["Sergei Rachmaninoff"],
+    "Rach": ["Sergei Rachmaninoff"],
+    "Schubert": ["Franz Schubert"],
+    "Schumann": ["Robert Schumann"],
+    "Brahms": ["Johannes Brahms"],
+    "Debussy": ["Claude Debussy"],
+    "Ravel": ["Maurice Ravel"],
+    "Prokofiev": ["Sergei Prokofiev"],
+    "Scriabin": ["Alexander Scriabin"],
+    "Tchaikovsky": ["Pyotr Ilyich Tchaikovsky"],
+    "Mendelssohn": ["Felix Mendelssohn"],
+    "Haydn": ["Joseph Haydn"],
+    "Handel": ["George Frideric Handel"],
+    "Vivaldi": ["Antonio Vivaldi"],
+    "Scarlatti": ["Domenico Scarlatti"],
+    "D Scarlatti": ["Domenico Scarlatti"],
+}
+
 # --- Utility Functions ---
 
 def slugify(value):
@@ -143,7 +177,9 @@ class WikipediaClient:
         logging.info(f"Cache MISS for: {name}. Fetching from Wikipedia...")
         
         # Try to find a valid Wikipedia page
+        # Try to find a valid Wikipedia page
         search_terms = [
+            f"{name} {entity_type}", # e.g. "John Ireland composer" - Most specific first
             name,
             f"{name} ({entity_type})",
             f"{name} (musician)"
@@ -279,18 +315,25 @@ class MidiLibraryGenerator:
         logging.info(f"For {file_path.name} got: {metadata}")
         return metadata
 
-    def _extract_pianists_from_pdfs(self):
-        """Scans input_dir for PDFs, converts to text, and extracts pianist info."""
+    def _extract_names_from_pdfs(self):
+        """
+        Scans input_dir for PDFs, converts to text, and extracts names with dates.
+        Returns a mapping of {slug: Full Name (Dates)}.
+        Used for both performers and composers to resolve short names.
+        """
         mapping = {}
-        pdfs = list(self.input_dir.glob("*.pdf"))
+        pdfs = list(self.input_dir.rglob("*.pdf"))
         if not pdfs:
-            logging.info("No PDF files found in input directory for pianist extraction.")
+            logging.info("No PDF files found in input directory for name extraction.")
             return mapping
 
-        logging.info(f"Found {len(pdfs)} PDF files. Extracting pianist data...")
+        logging.info(f"Found {len(pdfs)} PDF files. Extracting names...")
         
         # Regex to find "Name (YYYY-YYYY)" lines
-        pattern = re.compile(r'^(.+?)\s+\((\d{4}-\d{4})\)\s*$')
+        # Allows for spaces and different dash types (hyphen, en-dash)
+        # We look for names embedded in the line, often preceded by multiple spaces in a table
+        # We require the name to be at least 3 chars to avoid noise
+        pattern = re.compile(r'([A-Za-z,.\' -]{3,})\s+\((\d{4}\s*[-–]\s*\d{4})\)')
 
         for pdf_file in pdfs:
             try:
@@ -305,25 +348,67 @@ class MidiLibraryGenerator:
                 
                 for line in content.splitlines():
                     line = line.strip()
-                    match = pattern.match(line)
+                    # Use search instead of match to find it anywhere in the line
+                    match = pattern.search(line)
                     if match:
                         full_name = match.group(1).strip()
                         dates = match.group(2).strip()
+                        
+                        # Clean up full_name (it might have captured preceding column text if not careful)
+                        # In the table, it seems to be "   Name (Dates)   "
+                        # Our regex ([A-Za-z,.' -]{3,}) is greedy, so it might eat backwards.
+                        # But usually there are multiple spaces between columns.
+                        # Let's rely on the fact that we stripped the line, but we are searching.
+                        # Actually, if we use search, the greedy match might include the previous column if it's text.
+                        # Example: "Title Name (Dates)" -> full_name = "Title Name"
+                        # We should probably look for double spaces before the name if possible, or just trust the structure.
+                        # The sample showed: "   Beach                Beach, Amy (1867-1944)   "
+                        # The previous column ends with "Beach".
+                        # If we match `\s{2,}([A-Za-z,.' -]+?)\s+\((\d{4}...)\)`, it forces a gap.
+                        
+                        # Let's try to be safer: split by double spaces and check each part?
+                        # Or just use the regex we have but be careful.
+                        # If I use `\s{2,}` it might fail if it's the first column.
+                        # But in this PDF, the name seems to be in a middle column.
+                        
+                        # Let's try to clean the name: if it has multiple spaces inside, it might be "Title   Name".
+                        # But names can have spaces.
+                        # Let's stick to the simple regex for now but maybe trim it better.
+                        
+                        # If the name contains "   ", split and take the last part?
+                        if "   " in full_name:
+                            full_name = full_name.split("   ")[-1].strip()
+
                         display_name = f"{full_name} ({dates})"
                         
                         # Heuristic for Short Name
-                        parts = full_name.split()
-                        last_name = parts[-1]
-                        
-                        if len(parts) > 1 and parts[-2].lower() == "d'albert":
-                             last_name = "d'Albert"
-                        elif len(parts) > 1 and parts[-2].lower() == "von":
-                            last_name = f"von {last_name}"
+                        if ',' in full_name:
+                            # "Last, First" format
+                            last_name = full_name.split(',')[0].strip()
+                            # Reconstruct display name as "First Last" for consistency?
+                            # Or keep as is? The mapping value is used for display.
+                            # Let's keep the display name as found in PDF, or normalize it?
+                            # If PDF says "Beach, Amy (1867-1944)", we probably want "Amy Beach (1867-1944)" for consistency?
+                            # But let's just fix the mapping key first.
+                        else:
+                            # "First Last" format
+                            parts = full_name.split()
+                            last_name = parts[-1]
+                            
+                            if len(parts) > 1 and parts[-2].lower() == "d'albert":
+                                 last_name = "d'Albert"
+                            elif len(parts) > 1 and parts[-2].lower() == "von":
+                                last_name = f"von {last_name}"
 
                         short_slug = slugify(last_name)
                         if short_slug not in mapping:
                             mapping[short_slug] = display_name
                         
+                        # Also map the full slug
+                        full_slug = slugify(full_name)
+                        if full_slug not in mapping:
+                            mapping[full_slug] = display_name
+                            
                         if "d'albert" in full_name.lower():
                              mapping["dalbert"] = display_name
 
@@ -332,7 +417,7 @@ class MidiLibraryGenerator:
             except Exception as e:
                 logging.error(f"Error extracting from {pdf_file}: {e}")
         
-        logging.info(f"Extracted {len(mapping)} pianists from PDFs.")
+        logging.info(f"Extracted {len(mapping)} names from PDFs.")
         return mapping
 
     def _load_pianist_mapping(self):
@@ -371,6 +456,87 @@ class MidiLibraryGenerator:
             
         return False
 
+    def _format_display_name(self, full_name):
+        """
+        Formats a name as "Last, First (Dates)" for display.
+        Input: "Amy Beach (1867-1944)" or "Amy Beach"
+        Output: "Beach, Amy (1867-1944)" or "Beach, Amy"
+        """
+        # Check for dates
+        match = re.match(r'^(.+?)\s+(\(\d{4}-\d{4}\))$', full_name)
+        if match:
+            name_part = match.group(1)
+            dates_part = match.group(2)
+        else:
+            name_part = full_name
+            dates_part = ""
+            
+        # Split name into parts
+        parts = name_part.split()
+        if len(parts) > 1:
+            # Handle "von", "de", etc. if needed, but simple Last, First is usually ok
+            last = parts[-1]
+            first = " ".join(parts[:-1])
+            formatted_name = f"{last}, {first}"
+        else:
+            formatted_name = name_part
+            
+        if dates_part:
+            formatted_name += f" {dates_part}"
+            
+        return formatted_name
+
+    def _resolve_composers(self, raw_name, pdf_mapping=None):
+        """
+        Resolves a raw composer name into a list of full names.
+        Handles aliases, multi-composer strings (e.g. "Liszt-Busoni"),
+        and PDF-based canonical name lookup.
+        """
+        resolved_names = []
+        
+        logging.debug(f"Resolving '{raw_name}'...")
+
+        # 1. Check explicit aliases first (e.g. "Liszt-Busoni" -> ["Franz Liszt", "Ferruccio Busoni"])
+        if raw_name in COMPOSER_ALIASES:
+            val = COMPOSER_ALIASES[raw_name]
+            names_to_process = val if isinstance(val, list) else [val]
+        else:
+            # 2. If no alias, check if it's a hyphenated name (e.g. "Alabieff-Liszt")
+            # But be careful not to split double-barrelled surnames if they exist in aliases
+            if '-' in raw_name:
+                names_to_process = [part.strip() for part in raw_name.split('-')]
+            else:
+                names_to_process = [raw_name]
+
+        # 3. Process each name (resolve against PDF mapping or Aliases)
+        for name in names_to_process:
+            # Check aliases again for individual parts (e.g. "Bthvn")
+            if name in COMPOSER_ALIASES:
+                val = COMPOSER_ALIASES[name]
+                sub_names = val if isinstance(val, list) else [val]
+                resolved_names.extend(sub_names)
+                continue
+
+            # Check PDF mapping (Canonical Name Database)
+            name_slug = slugify(name)
+            if pdf_mapping and name_slug in pdf_mapping:
+                full_string = pdf_mapping[name_slug]
+                logging.debug(f"  Found in PDF mapping: {name_slug} -> {full_string}")
+                
+                # Extract name part: "Name (Dates)" -> "Name"
+                match = re.match(r'^(.+?)\s+\(\d{4}-\d{4}\)$', full_string)
+                if match:
+                    resolved_names.append(match.group(1))
+                else:
+                    resolved_names.append(full_string)
+            else:
+                logging.debug(f"  NOT found in PDF mapping: {name_slug}")
+                # No resolution found, use as is
+                resolved_names.append(name)
+        
+        # Deduplicate and return
+        return list(dict.fromkeys(resolved_names))
+
     def build_data_model(self):
         """
         Builds the complete master data model for the entire library.
@@ -384,10 +550,11 @@ class MidiLibraryGenerator:
         
         # Load mappings from CSV and PDFs
         csv_mapping = self._load_pianist_mapping()
-        pdf_mapping = self._extract_pianists_from_pdfs()
+        # Use the new generalized extraction for both performers and composers
+        pdf_name_mapping = self._extract_names_from_pdfs()
         
-        # Merge mappings (PDFs take precedence)
-        pianist_mapping = {**csv_mapping, **pdf_mapping}
+        # Merge mappings for performers (PDFs take precedence)
+        pianist_mapping = {**csv_mapping, **pdf_name_mapping}
 
         model = {
             "composers": {},
@@ -403,19 +570,37 @@ class MidiLibraryGenerator:
             # 1. Parse metadata
             metadata = self._parse_metadata(file_path)
             
-            # 2. Get/Create Composer
-            composer_name = metadata['composer']
-            composer_slug = slugify(composer_name)
-            if composer_slug not in model['composers']:
-                wiki_data = self.wiki_client.get_entity_data(composer_name, "composer")
-                model['composers'][composer_slug] = {
-                    "name": composer_name,
-                    "slug": composer_slug,
-                    "page_url": f"/composers/{composer_slug}.html",
-                    "works": [],
-                    **wiki_data
-                }
-            model['composers'][composer_slug]['works'].append(file_id)
+            # 2. Get/Create Composer(s)
+            raw_composer_name = metadata['composer']
+            # Pass the PDF mapping to help resolve short names
+            resolved_composers = self._resolve_composers(raw_composer_name, pdf_name_mapping)
+            
+            composer_slugs = []
+            for composer_name in resolved_composers:
+                composer_slug = slugify(composer_name)
+                composer_slugs.append(composer_slug)
+                
+                if composer_slug not in model['composers']:
+                    # Format for display: "Last, First (Dates)"
+                    display_name = self._format_display_name(composer_name)
+                    
+                    # Clean name for Wiki search (remove dates)
+                    # "Amy Beach (1867-1944)" -> "Amy Beach"
+                    search_name = re.sub(r'\s+\(\d{4}-\d{4}\)', '', composer_name)
+                    
+                    wiki_data = self.wiki_client.get_entity_data(search_name, "composer")
+                    
+                    model['composers'][composer_slug] = {
+                        "name": display_name, # Use formatted name for UI
+                        "slug": composer_slug,
+                        "page_url": f"/composers/{composer_slug}.html",
+                        "works": [],
+                        **wiki_data
+                    }
+                model['composers'][composer_slug]['works'].append(file_id)
+            
+            # Use the first composer as the primary one for the file entry
+            primary_composer_slug = composer_slugs[0] if composer_slugs else "unknown"
 
             # 3. Get/Create Performer
             performer_name = metadata['performer']
@@ -426,9 +611,15 @@ class MidiLibraryGenerator:
                 performer_name = pianist_mapping[performer_slug]
             
             if performer_slug not in model['performers']:
-                wiki_data = self.wiki_client.get_entity_data(performer_name, "performer")
+                # Format for display: "Last, First (Dates)"
+                display_name = self._format_display_name(performer_name)
+                
+                # Clean name for Wiki search (remove dates)
+                search_name = re.sub(r'\s+\(\d{4}-\d{4}\)', '', performer_name)
+                
+                wiki_data = self.wiki_client.get_entity_data(search_name, "performer")
                 model['performers'][performer_slug] = {
-                    "name": performer_name,
+                    "name": display_name,
                     "slug": performer_slug,
                     "page_url": f"/performers/{performer_slug}.html",
                     "works": [],
@@ -447,7 +638,7 @@ class MidiLibraryGenerator:
             model['files'][file_id] = {
                 "id": file_id,
                 "title": metadata['work'],
-                "composer_slug": composer_slug,
+                "composer_slug": primary_composer_slug,
                 "performer_slug": performer_slug,
                 "page_url": f"/files/{file_id}.html",
                 "midi_url": f"/midi-files/{file_id}.mid" # Relative URL
@@ -606,8 +797,17 @@ def main():
         required=True,
         help="Path to the directory where the static site will be generated."
     )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help="Enable debug logging."
+    )
     
     args = parser.parse_args()
+
+    # Configure logging based on flag
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    logging.getLogger().setLevel(log_level)
 
     try:
         generator = MidiLibraryGenerator(
