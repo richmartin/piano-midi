@@ -1,0 +1,10 @@
+# --- PianoPi ---
+# The data partition: the library mirror, recordings, state, saved WiFi networks, the saved clock.
+# Everything else is read-only (overlayroot) and forgets its changes at reboot.
+LABEL=piano-data  /var/lib/piano  ext4  defaults,noatime,commit=60  0  2
+# NetworkManager's saved networks have to survive a reboot, so they live on the data partition.
+/var/lib/piano/nm  /etc/NetworkManager/system-connections  none  bind,x-systemd.requires-mounts-for=/var/lib/piano  0  0
+# The saved clock (systemd-timesyncd's clock file), so an offline boot starts near the right time.
+/var/lib/piano/timesync  /var/lib/systemd/timesync  none  bind,x-systemd.requires-mounts-for=/var/lib/piano  0  0
+# The panel's CIRCUITPY drive, mountable by rich without sudo, for badge/deploy.sh over SSH.
+LABEL=CIRCUITPY  /mnt/circuitpy  vfat  noauto,nofail,user,uid=1001,gid=1001  0  0

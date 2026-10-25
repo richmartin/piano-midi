@@ -2,3 +2,7 @@
 out
 logs
 .wikipedia_cache.json
+__pycache__/
+*.pyc
+image/work/
+image/cache/

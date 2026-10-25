@@ -1,0 +1,26 @@
+#!/bin/bash
+# piano-maint on|off|status -- switch the read-only root off for maintenance, and back on.
+#
+# Normally the root filesystem is a RAM overlay: changes (apt, edits) vanish at reboot, which is
+# what protects the SD card. "on" turns the overlay off at the next boot so changes stick; do the
+# work, then "off" puts the protection back. Both reboot.
+#
+# In maintenance mode the boot partition is still read-only (fstab). Before an apt upgrade that may
+# bring a new kernel: mount -o remount,rw /boot/firmware
+set -euo pipefail
+CMDLINE=/boot/firmware/cmdline.txt
+case "${1:-status}" in
+  status)
+    if grep -q overlayroot=tmpfs /proc/cmdline; then echo "protected (read-only root)"; else echo "MAINTENANCE: root is writable"; fi ;;
+  on)
+    mount -o remount,rw /boot/firmware
+    sed -i 's/ *overlayroot=[^ ]*//' "$CMDLINE"
+    mount -o remount,ro /boot/firmware || true
+    echo "maintenance mode after reboot; rebooting"; systemctl reboot ;;
+  off)
+    mount -o remount,rw /boot/firmware
+    grep -q overlayroot= "$CMDLINE" || sed -i 's/^/overlayroot=tmpfs:recurse=0 /' "$CMDLINE"
+    mount -o remount,ro /boot/firmware || true
+    echo "protection back on after reboot; rebooting"; systemctl reboot ;;
+  *) echo "usage: piano-maint on|off|status" >&2; exit 2 ;;
+esac

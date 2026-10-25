@@ -1,0 +1,19 @@
+[Unit]
+Description=Piano player and loop station (pianod)
+After=local-fs.target
+RequiresMountsFor=/var/lib/piano
+# No network dependency on purpose: the library mirror is local, so the piano plays without one.
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/opt/piano/pianod/bin/pianod
+RuntimeDirectory=piano
+Restart=always
+RestartSec=3
+# pianod pings systemd every second; if it hangs, systemd kills and restarts it.
+WatchdogSec=30
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

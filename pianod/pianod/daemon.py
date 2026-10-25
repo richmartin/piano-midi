@@ -1,0 +1,417 @@
+"""pianod: plays the MIDI library and runs Performance mode on the piano it is cabled to.
+
+The Pi is the source of truth. Clients talk newline-delimited JSON, one request per line, one
+reply per line:
+  - the panel (PyBadge), over its USB data port (found by itself, reconnected by itself);
+  - the `piano` command, over a Unix socket;
+  - later, the web remote, relayed by the server over the same protocol.
+pianod also pushes {"type": "state", ...} to the panel whenever anything changes, and every
+second regardless, so the panel never shows something stale for long.
+
+Same bones as hotpi's heatd, deliberately.
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import logging
+import os
+import random
+import socket
+import threading
+import time
+
+from . import library, looper, midiio, player, smf, store
+
+LOG = logging.getLogger("pianod")
+
+DATA = os.environ.get("PIANO_DATA", "/var/lib/piano")
+SOCK = os.environ.get("PIANO_SOCK", "/run/piano/pianod.sock")
+SERIAL_GLOB = os.environ.get("PIANO_SERIAL", "/dev/serial/by-id/*Adafruit*-if02")
+SERVER_URL = os.environ.get("PIANO_SERVER", "https://home.fam-mart.in")
+MIDI_OUT = os.environ.get("PIANO_MIDI_OUT", "")      # substring of the port name; "" = first
+MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
+LATENCY = float(os.environ.get("PIANO_LATENCY_MS", "0")) / 1000     # solenoid delay, measured
+ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
+POLL = 0.005                  # looper tick
+PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
+MODES = ("library", "performance")
+
+
+def notify(msg: str) -> None:
+    """systemd's READY/WATCHDOG, when running under it."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    if addr.startswith("@"):
+        addr = "\0" + addr[1:]
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+        try:
+            s.sendto(msg.encode(), addr)
+        except OSError:
+            pass
+
+
+class Pianod:
+    def __init__(self, out=None, midi_in=None):
+        self.lock = threading.RLock()
+        os.makedirs(DATA, exist_ok=True)
+        self.lib = library.Library(DATA)
+        if out is None:
+            out, midi_in = midiio.open_ports(MIDI_OUT, MIDI_IN)
+        self.out = out
+        self.midi_in = midi_in
+        self.gate = midiio.EchoGate(window=ECHO_MS / 1000)
+        self.player = player.Player(self.out, on_event=self.gate.sent)
+        self.player.on_ended = self._track_ended
+        self.looper = looper.Looper(self.out, latency=LATENCY, on_event=self.gate.sent)
+        self.mode = "library"
+        self.queue: list[dict] = []          # [{id, title, composer}]
+        self.index = -1
+        self.listeners: list = []
+        self.last_input = 0.0                # monotonic: someone played the keys
+        st = store.read_json(f"{DATA}/state.json", {})
+        if 1 <= st.get("volume", 0) <= 11:
+            self.player.volume = st["volume"]
+
+    def _save_state(self):
+        store.write_json(f"{DATA}/state.json", {"volume": self.player.volume})
+
+    # --- state ---------------------------------------------------------------------------
+    def state(self) -> dict:
+        with self.lock:
+            cur = self.queue[self.index] if 0 <= self.index < len(self.queue) else None
+            return {
+                "type": "state",
+                "mode": self.mode,
+                "playing": self.player.playing,
+                "title": cur["title"] if cur else None,
+                "composer": cur["composer"] if cur else None,
+                "pos": round(self.player.position(), 1),
+                "len": round(self.player.duration, 1),
+                "index": self.index,
+                "count": len(self.queue),
+                "next_title": self.queue[self.index + 1]["title"] if 0 <= self.index + 1 < len(self.queue) else None,
+                "volume": self.player.volume,
+                "midi_out": self.out.connected,
+                "midi_in": self.midi_in is not None,
+                "works": len(self.lib.all_works()),
+                "perf": self.looper.status(),
+            }
+
+    def _push(self):
+        s = self.state()
+        for fn in list(self.listeners):
+            try:
+                fn(s)
+            except Exception:    # a client that's gone away; its own thread will tidy up
+                pass
+
+    # --- the queue -------------------------------------------------------------------------
+    def _load_current(self) -> None:
+        cur = self.queue[self.index]
+        events, duration = smf.load(self.lib.path(self.lib.work(cur["id"])))
+        self.player.load(events, duration, cur["title"])
+
+    def _play_queue(self, works: list[dict], shuffle: bool = False) -> None:
+        if not works:
+            raise ValueError("nothing to play")
+        if shuffle:
+            works = random.sample(works, len(works))
+        self.queue = [{"id": w["id"], "title": w["title"], "composer": w.get("composer", "")} for w in works]
+        self.index = 0
+        self._load_current()
+        self.player.play()
+
+    def _track_ended(self):
+        """From the player's worker thread: the piece finished; on to the next."""
+        with self.lock:
+            if self.mode != "library" or self.index + 1 >= len(self.queue):
+                self._push()
+                return
+            self.index += 1
+            try:
+                self._load_current()
+                self.player.play()
+            except (OSError, ValueError) as e:
+                LOG.warning("skipping %s: %s", self.queue[self.index]["id"], e)
+                self._track_ended()
+                return
+        self._push()
+
+    # --- requests ------------------------------------------------------------------------
+    def handle(self, req: dict) -> dict:
+        cmd = req.get("cmd")
+        try:
+            reply = self._handle(cmd, req)
+        except (ValueError, KeyError, TypeError, OSError, looper.LooperError) as e:
+            return {"ok": False, "error": str(e)}
+        if cmd not in ("status", "composers", "works", "queue", "recordings"):
+            self._push()
+        return {"ok": True, **(reply or {})}
+
+    def _handle(self, cmd, req):
+        with self.lock:
+            if cmd == "status":
+                return {"state": self.state()}
+            if cmd == "composers":
+                return {"composers": [{"name": c["name"], "slug": c["slug"], "works": len(c.get("works", []))}
+                                      for c in self.lib.composers]}
+            if cmd == "works":
+                return {"works": [{"id": w["id"], "title": w["title"]} for w in self.lib.works_of(req["slug"])]}
+            if cmd == "recordings":
+                return {"works": [{"id": w["id"], "title": w["title"]} for w in self.lib.recordings()]}
+            if cmd == "queue":
+                return {"queue": [w["title"] for w in self.queue], "index": self.index}
+
+            if cmd == "play":
+                # One of: ids (a list), slug (a composer), all (everything); optional shuffle.
+                self._require_library_mode()
+                if "ids" in req:
+                    works = [self.lib.work(i) for i in req["ids"]]
+                elif "slug" in req:
+                    works = self.lib.works_of(req["slug"])
+                elif req.get("all"):
+                    works = sorted(self.lib.all_works(), key=lambda w: (w["composer"], w["title"]))
+                else:
+                    raise ValueError("play needs ids, slug or all")
+                self._play_queue(works, bool(req.get("shuffle")))
+                return {}
+            if cmd == "toggle":
+                self._require_library_mode()
+                if self.player.playing:
+                    self.player.pause()
+                elif self.player.events:
+                    self.player.play()
+                elif self.queue:
+                    self._load_current()
+                    self.player.play()
+                else:
+                    raise ValueError("nothing queued: choose something to play")
+                return {}
+            if cmd == "pause":
+                self.player.pause()
+                return {}
+            if cmd == "resume":
+                self._require_library_mode()
+                self.player.play()
+                return {}
+            if cmd == "stop":
+                self.player.stop()
+                return {}
+            if cmd in ("next", "prev"):
+                self._require_library_mode()
+                if not self.queue:
+                    raise ValueError("nothing queued")
+                step = 1 if cmd == "next" else -1
+                self.index = max(0, min(len(self.queue) - 1, self.index + step))
+                was_playing = self.player.playing
+                self._load_current()
+                if was_playing:
+                    self.player.play()
+                return {}
+            if cmd == "seek":
+                self.player.seek(float(req["t"]))
+                return {}
+            if cmd == "volume":
+                self.player.set_volume(int(req["v"]))
+                self._save_state()
+                return {}
+            if cmd == "panic":
+                self.player.pause()
+                self.out.panic()
+                return {}
+
+            if cmd == "mode":
+                mode = req.get("mode")
+                if mode not in MODES:
+                    raise ValueError(f"mode must be one of {', '.join(MODES)}")
+                if mode != self.mode:
+                    self.player.stop()
+                    self.looper.clear()
+                    self.mode = mode
+                return {}
+
+            if cmd in ("perf_record", "perf_close_loop", "perf_take", "perf_play",
+                       "perf_overdub", "perf_undo", "perf_redo", "perf_clear"):
+                if self.mode != "performance":
+                    raise ValueError("not in performance mode")
+                {"perf_record": self.looper.record,
+                 "perf_close_loop": self.looper.close_loop,
+                 "perf_take": self.looper.finish_take,
+                 "perf_play": self.looper.toggle_play,
+                 "perf_overdub": self.looper.toggle_overdub,
+                 "perf_undo": self.looper.undo,
+                 "perf_redo": self.looper.redo,
+                 "perf_clear": self.looper.clear}[cmd]()
+                return {}
+            if cmd == "perf_save":
+                if not self.looper.layers:
+                    raise ValueError("nothing recorded")
+                title = str(req.get("title") or "").strip() or time.strftime("Take %Y-%m-%d %H.%M")
+                path = self.lib.recording_path(title)
+                smf.save(path, self.looper.merged_events(), title)
+                return {"saved": os.path.basename(path)}
+
+        if cmd == "sync":
+            # The downloads run outside the lock; the mirror swap inside library.sync is atomic
+            # per file, and reads of self.lib go through self.lock only for the lists, which
+            # library.load() replaces whole.
+            with self.lock:
+                if self.player.playing:
+                    raise ValueError("busy playing; sync later")
+            return self.lib.sync(SERVER_URL)
+        raise ValueError(f"unknown command {cmd!r}")
+
+    def _require_library_mode(self):
+        if self.mode != "library":
+            raise ValueError("in performance mode (switch back to the library first)")
+
+    # --- MIDI in --------------------------------------------------------------------------
+    def _midi_in_loop(self):
+        """The piano's keys: feed Performance mode, and note that someone is playing."""
+        while True:
+            port = self.midi_in
+            if port is None:
+                time.sleep(3)
+                continue
+            try:
+                msg = port.receive()
+            except (OSError, RuntimeError) as e:
+                LOG.warning("MIDI in failed (%s)", e)
+                self.midi_in = None
+                continue
+            kind = None
+            if msg.type == "note_on" and msg.velocity > 0:
+                kind, a, b = "on", msg.note, msg.velocity
+            elif msg.type == "note_off" or (msg.type == "note_on" and msg.velocity == 0):
+                kind, a, b = "off", msg.note, 0
+            elif msg.type == "control_change" and msg.control in smf.PEDALS:
+                kind, a, b = "cc", msg.control, msg.value
+            if kind is None:
+                continue
+            if kind in ("on", "off") and self.gate.is_echo(kind, a):
+                continue
+            self.last_input = time.monotonic()
+            if self.mode == "performance":
+                self.looper.note_in(kind, a, b)
+
+    # --- running ---------------------------------------------------------------------------
+    def run(self):
+        threading.Thread(target=serve_socket, args=(self,), daemon=True, name="socket").start()
+        threading.Thread(target=serve_panel, args=(self,), daemon=True, name="panel").start()
+        threading.Thread(target=self._midi_in_loop, daemon=True, name="midi-in").start()
+        notify("READY=1")
+        LOG.info("pianod up: %d works, MIDI out %s", len(self.lib.all_works()),
+                 "connected" if self.out.connected else "NOT connected")
+        last_push = time.monotonic()
+        while True:
+            self.looper.poll()
+            time.sleep(POLL)
+            t = time.monotonic()
+            if t - last_push >= PUSH_EVERY:
+                self._push()
+                notify("WATCHDOG=1")
+                last_push = t
+
+
+def _serve_lines(d: Pianod, read_line, write_line, push: bool, name: str):
+    """One client: read requests, write replies (and pushes, for the panel), until it goes away."""
+    send_lock = threading.Lock()
+
+    def send(obj):
+        with send_lock:
+            write_line(json.dumps(obj, separators=(",", ":")) + "\n")
+
+    if push:
+        d.listeners.append(send)
+        send(d.state())
+    try:
+        while True:
+            line = read_line()
+            if line is None:
+                return
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                req = json.loads(line)
+            except ValueError:
+                send({"ok": False, "error": "not JSON"})
+                continue
+            reply = d.handle(req)
+            if "id" in req:
+                reply["id"] = req["id"]
+            send(reply)
+    finally:
+        if push and send in d.listeners:
+            d.listeners.remove(send)
+        (LOG.info if push else LOG.debug)("%s disconnected", name)
+
+
+def serve_socket(d: Pianod):
+    os.makedirs(os.path.dirname(SOCK), exist_ok=True)
+    try:
+        os.unlink(SOCK)
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        srv.bind(SOCK)
+    except OSError as e:
+        # A daemon nobody can talk to is worse than a dead one: die loudly, systemd restarts us.
+        LOG.error("can't bind %s: %s", SOCK, e)
+        os._exit(1)
+    os.chmod(SOCK, 0o666)      # the `piano` CLI runs as rich; pianod as root under systemd
+    srv.listen(4)
+    while True:
+        conn, _ = srv.accept()
+        f = conn.makefile("rw", buffering=1, encoding="utf-8")
+
+        def rl(f=f):
+            line = f.readline()
+            return line or None
+
+        threading.Thread(target=_serve_lines, args=(d, rl, f.write, False, "cli"), daemon=True).start()
+
+
+def serve_panel(d: Pianod):
+    """Find the PyBadge's data port, talk to it, and look for it again when it goes."""
+    import serial
+    while True:
+        ports = sorted(glob.glob(SERIAL_GLOB))
+        if not ports:
+            time.sleep(3)
+            continue
+        try:
+            port = serial.Serial(ports[0], 115200, timeout=None)
+        except (OSError, serial.SerialException) as e:
+            LOG.warning("panel port %s: %s", ports[0], e)
+            time.sleep(3)
+            continue
+        LOG.info("panel connected on %s", ports[0])
+
+        def rl():
+            try:
+                b = port.readline()
+            except (OSError, serial.SerialException):
+                return None
+            return b.decode("utf-8", "replace") if b else None
+
+        def wl(s):
+            port.write(s.encode())
+
+        try:
+            _serve_lines(d, rl, wl, True, "panel")
+        finally:
+            try:
+                port.close()
+            except Exception:
+                pass
+        time.sleep(1)
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    Pianod().run()
