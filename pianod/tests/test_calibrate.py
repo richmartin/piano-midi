@@ -222,3 +222,21 @@ def test_a_note_silent_with_the_pedal_sets_the_floor_above_it():
                60: Strike(sensed=62)}
     p, _ = key_params(curve, {}, 0.05, curve_p)
     assert p["v_min_p"] == 45                    # 20 sounded once, but 30 didn't: not reliable
+
+
+def test_a_pedal_velocity_that_only_sometimes_sounds_is_not_the_floor():
+    class Flaky(FakePiano):
+        pedal_strikes = 0
+
+        def strike(self, k, v, hold, listen=True, pedal=False):
+            if pedal and v == 20:                  # sounds one try in two
+                self.pedal_strikes += 1
+                if self.pedal_strikes % 2 == 0:
+                    return Strike()
+            return super().strike(k, v, hold, listen, pedal)
+
+    c = run(Flaky(), keys=(50,))
+    assert c.params[50]["v_min_p"] == 30
+    tries = c.raw[50]["curve_p"]
+    assert len(tries[20]) == 2 and not tries[20][-1]["sensed"]      # stopped at the miss
+    assert len(tries[30]) == 3 and len(tries[45]) == 1              # then reliable: one try

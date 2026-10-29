@@ -190,7 +190,9 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   without the pedal and 0/4 with it; 40 ms sounds 4/4 either way. Now F4 measures 77 ms
   (30 ms margin). That costs time: ~33 s a key, ~48 minutes for all 88 (~55 with the pedal curve).
 - **With the pedal down, per key**: the curve again at 12 / 20 / 30 / 45 / 60, pedal held,
-  sensor only (lifting the dampers is noisy). Found because, after the second full calibration,
+  sensor only (lifting the dampers is noisy). Near the floor a note sounds only sometimes, so from the bottom
+  up each velocity is tried up to 3 times and counts only if every try sounds; above the first
+  that does, one try each (~5 more minutes). Found because, after the second full calibration,
   the Gnossienne still lost 23 of 980 notes, all soft accompaniment. Notes fired together were
   the first suspect, but measured alone they cost 0–1 sensor units and never missed (192 notes in
   chords of 2–4). The pedal was it: in the Gnossienne, soft notes under the pedal missed 9%

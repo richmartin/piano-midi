@@ -6,7 +6,9 @@ For each of the 88 keys (docs/design.md, "Calibrate"):
             the strike took (-> l_on per velocity) and the release (-> l_off), and how loud the
             mic heard it (a cross-check on the sensor)
   pedal     a held note at each of CURVE_P_V with the sustain pedal down: soft notes strike
-            weaker then (-> sv_p, mv_p, and v_min_p, the least velocity that still sounds)
+            weaker then (-> sv_p, mv_p, and v_min_p, the least velocity that still sounds).
+            Near the floor a note sounds only sometimes, so from the bottom up each velocity
+            gets up to CURVE_P_TRIES tries, and counts only if all of them sound
   md        at each of MD_V, the shortest hold that still sounds, by bisection
   mr        the shortest gap after a note-off before the key can sound again, by bisection —
             with the sustain pedal down (the harder case: on F4, 30 ms works without the pedal
@@ -47,6 +49,7 @@ KEYS = range(21, 109)
 CURVE_V = (12, 20, 30, 45, 60, 80, 100, 127)
 CURVE_HOLD = 0.40
 CURVE_P_V = (12, 20, 30, 45, 60)       # above 60 the pedal costs little: the plain curve rules
+CURVE_P_TRIES = 3
 MD_V = (15, 30, 60)
 MD_RANGE = (0.010, 0.250)
 MR_V, MR_HOLD, MR_RANGE, MR_TRIES, MR_STEPS = 30, 0.30, (0.0, 0.250), 3, 4
@@ -284,7 +287,7 @@ class Calibrator:
     def _measure(self, k: int) -> None:
         rig = self.rig
         curve = {v: rig.strike(k, v, CURVE_HOLD) for v in CURVE_V}
-        curve_p = {v: rig.strike(k, v, CURVE_HOLD, listen=False, pedal=True) for v in CURVE_P_V}
+        curve_p, tries_p = self._pedal_curve(k)
         md = {v: bisect(lambda h: rig.strike(k, v, h, listen=False).sensed is not None, *MD_RANGE)
               for v in MD_V}
         mr = bisect(lambda g: all(rig.restrike(k, MR_V, MR_HOLD, g) for _ in range(MR_TRIES)),
@@ -293,7 +296,26 @@ class Calibrator:
         if flags:
             self.flags[k] = flags
         self.raw[k] = {"curve": {v: s.__dict__ for v, s in curve.items()},
-                       "curve_p": {v: s.__dict__ for v, s in curve_p.items()}, "md": md, "mr": mr}
+                       "curve_p": {v: [s.__dict__ for s in ss] for v, ss in tries_p.items()},
+                       "md": md, "mr": mr}
+
+    def _pedal_curve(self, k: int) -> tuple[dict, dict]:
+        """The curve with the pedal down: velocity -> one Strike (the median reading, or a miss
+        if any try missed), and every try. Each velocity is tried until one misses or all
+        CURVE_P_TRIES sound; once one velocity has sounded every time, those above it — well
+        clear of the floor — get a single try."""
+        curve, tries, reliable = {}, {}, False
+        for v in CURVE_P_V:
+            ss = []
+            while len(ss) < (1 if reliable else CURVE_P_TRIES) and (not ss or ss[-1].sensed):
+                ss.append(self.rig.strike(k, v, CURVE_HOLD, listen=False, pedal=True))
+            tries[v] = ss
+            if all(s.sensed for s in ss):
+                reliable = True
+                curve[v] = Strike(sensed=round(statistics.median(s.sensed for s in ss)))
+            else:
+                curve[v] = Strike()
+        return curve, tries
 
     def calibration(self) -> Calibration:
         return Calibration(self.params, L_CC,
