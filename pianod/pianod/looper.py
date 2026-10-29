@@ -269,6 +269,16 @@ class Looper:
             return p % self.length if self.looping else min(p, self.length)
         return 0.0
 
+    def lanes(self, now: float | None = None, top: int = 3, most: int = 48) -> list[list[float]]:
+        """The last `top` layers (the one being recorded last) as note-on times, each a fraction
+        of the loop: what the panel draws as lanes."""
+        span = self.length or self.position(now) or 1.0
+        rows = list(self.layers)
+        if self.state == "recording" or self.overdub:
+            rows.append(self._rec)
+        return [sorted({round(min(e.time / span, 0.999), 3) for e in layer if e.kind == "on"})[:most]
+                for layer in rows[-top:]]
+
     def merged_events(self) -> list[Event]:
         """Every layer as played, merged — what save writes, never the rendered send list."""
         return sorted((e for layer in self.layers for e in layer), key=lambda e: e.time)
@@ -282,4 +292,5 @@ class Looper:
             "length": round(self.length, 2),
             "pos": round(self.position(now), 2),
             "overdub": self.overdub,
+            "lanes": self.lanes(now),
         }

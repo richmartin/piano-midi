@@ -33,6 +33,15 @@ SERVER_URL = os.environ.get("PIANO_SERVER", "https://home.fam-mart.in")
 PAGE_BYTES = 3000              # the badge drops any line over 4 KB: lists go in pages under it
 
 
+def brief(w: dict, composer: bool = False) -> dict:
+    """A work as a list shows it: its pianist (short) if it's a roll, else its length."""
+    out = {"id": w["id"], "title": w["title"], "movement": w.get("movement"),
+           "performer": w.get("performer_short"), "duration": w.get("duration")}
+    if composer:
+        out["composer"] = w.get("composer_short") or w.get("composer")
+    return out
+
+
 def page(req: dict, key: str, items: list) -> dict:
     """All the items, or with "offset" in the request, the page from there that fits in
     PAGE_BYTES, and where the next one starts (None: that was the last)."""
@@ -54,6 +63,7 @@ ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the p
 POLL = 0.005                  # looper tick
 MIC_CHECK_EVERY = 30.0        # seconds between looks for a working mic
 PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
+KEYS_EVERY = 0.05             # the panel's live keys: at most twenty batches a second
 MODES = ("library", "performance")
 
 
@@ -89,6 +99,10 @@ class Pianod:
         self.queue: list[dict] = []          # [{id, title, composer}]
         self.index = -1
         self.listeners: list = []
+        self.favourites: list[str] = store.read_json(f"{DATA}/favourites.json", [])
+        self.keys_pending: dict[int, bool] = {}   # the piano's keys, for the panel's strip
+        self.keys_later: set[int] = set()
+        self.keys_sent = 0.0
         self.last_input = 0.0                # monotonic: someone played the keys
         self.calib: calibrate.Calibrator | None = None
         self.calib_summary: list[str] = []   # the last calibration's findings
@@ -108,8 +122,13 @@ class Pianod:
                 "type": "state",
                 "mode": self.mode,
                 "playing": self.player.playing,
+                "id": cur["id"] if cur else None,
                 "title": cur["title"] if cur else None,
-                "composer": cur["composer"] if cur else None,
+                "movement": cur.get("movement") if cur else None,
+                "composer": (cur.get("composer_short") or cur["composer"]) if cur else None,
+                "performer": cur.get("performer_name") if cur else None,
+                "roll": cur.get("roll") if cur else None,
+                "fav": bool(cur) and cur["id"] in self.favourites,
                 "pos": round(self.player.position(), 1),
                 "len": round(self.player.duration, 1),
                 "index": self.index,
@@ -175,7 +194,8 @@ class Pianod:
         except (ValueError, KeyError, TypeError, OSError, looper.LooperError) as e:
             return {"ok": False, "error": str(e)}
         if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
-                       "net", "wifi_scan", "wifi_log"):
+                       "net", "wifi_scan", "wifi_log", "pianists", "pianist_works", "collection",
+                       "favourites", "shelves"):
             self._push()
         return {"ok": True, **(reply or {})}
 
@@ -186,20 +206,39 @@ class Pianod:
         with self.lock:
             if self._calibrating() and cmd not in (
                     "status", "composers", "works", "recordings", "queue", "calibrate_cancel",
-                    "calibrate_summary", "panic", "net", "wifi_scan", "wifi_join", "wifi_log"):
+                    "calibrate_summary", "panic", "net", "wifi_scan", "wifi_join", "wifi_log",
+                    "pianists", "pianist_works", "collection", "favourites", "shelves", "fav"):
                 raise ValueError("calibrating (cancel it first)")
             if cmd == "status":
                 return {"state": self.state()}
             if cmd == "composers":
-                return page(req, "composers",
-                            [{"name": c["name"], "slug": c["slug"], "works": len(c.get("works", []))}
-                             for c in self.lib.composers])
+                return page(req, "composers", self.lib.composer_list())
             if cmd == "works":
-                return page(req, "works", [{"id": w["id"], "title": w["title"]}
-                                           for w in self.lib.works_of(req["slug"])])
+                return page(req, "works", [brief(w) for w in self.lib.works_of(req["slug"])])
             if cmd == "recordings":
-                return page(req, "works", [{"id": w["id"], "title": w["title"]}
-                                           for w in self.lib.recordings()])
+                return page(req, "works", [brief(w) for w in self.lib.recordings()])
+            if cmd == "pianists":
+                return page(req, "pianists", self.lib.pianist_list())
+            if cmd == "pianist_works":
+                return page(req, "works", [brief(w, composer=True) for w in self.lib.pianist_works(req["slug"])])
+            if cmd == "collection":
+                return page(req, "works", [brief(w, composer=True) for w in self.lib.collection(req["slug"])])
+            if cmd == "favourites":
+                return page(req, "works", [brief(w, composer=True) for w in self._favourite_works()])
+            if cmd == "shelves":
+                return {"composers": sum(1 for c in self.lib.composers if c.get("slug") != "unknown"),
+                        "pianists": len(self.lib.pianists), "favourites": len(self._favourite_works()),
+                        "takes": len(self.lib.recordings()), "collections": self.lib.collections()}
+            if cmd == "fav":
+                self.lib.work(req["id"])                     # it exists
+                favs = self.favourites
+                fav = req["id"] not in favs
+                if fav:
+                    favs.append(req["id"])
+                else:
+                    favs.remove(req["id"])
+                store.write_json(f"{DATA}/favourites.json", favs)
+                return {"fav": fav}
             if cmd == "queue":
                 return {"queue": [w["title"] for w in self.queue], "index": self.index}
 
@@ -210,10 +249,18 @@ class Pianod:
                     works = [self.lib.work(i) for i in req["ids"]]
                 elif "slug" in req:
                     works = self.lib.works_of(req["slug"])
+                elif "pianist" in req:
+                    works = self.lib.pianist_works(req["pianist"])
+                elif "collection" in req:
+                    works = self.lib.collection(req["collection"])
+                elif req.get("favourites"):
+                    works = self._favourite_works()
                 elif req.get("all"):
                     works = sorted(self.lib.all_works(), key=lambda w: (w["composer"], w["title"]))
                 else:
-                    raise ValueError("play needs ids, slug or all")
+                    raise ValueError("play needs ids, slug, pianist, collection, favourites or all")
+                if not works:
+                    raise ValueError("nothing to play there")
                 self._play_queue(works, bool(req.get("shuffle")))
                 return {}
             if cmd == "toggle":
@@ -397,6 +444,8 @@ class Pianod:
                 kind, a, b = "cc", msg.control, msg.value
             if kind is None:
                 continue
+            if kind in ("on", "off"):
+                self._key_moved(a, kind == "on")
             calib = self.calib
             if calib is not None and not calib.finished:
                 calib.rig.feed(kind, a, b)           # raw: the calibration wants the echoes
@@ -406,6 +455,44 @@ class Pianod:
             self.last_input = time.monotonic()
             if self.mode == "performance":
                 self.looper.note_in(kind, a, b)
+
+    def _favourite_works(self) -> list[dict]:
+        out = []
+        for i in self.favourites:
+            try:
+                out.append(self.lib.work(i))
+            except ValueError:                        # gone from the library since
+                pass
+        return out
+
+    # --- the keys, live, for the panel -------------------------------------------------------
+    def _key_moved(self, key: int, down: bool) -> None:
+        """Every key the piano reports, playback and people alike. A key pressed and released
+        within one batch shows pressed in this batch and released in the next, so short notes
+        still flash."""
+        with self.lock:
+            if not down and self.keys_pending.get(key) is True:
+                self.keys_later.add(key)
+            else:
+                self.keys_pending[key] = down
+                self.keys_later.discard(key)
+
+    def _flush_keys(self, now: float) -> None:
+        if now - self.keys_sent < KEYS_EVERY:
+            return
+        with self.lock:
+            if not self.keys_pending:
+                return
+            msg = {"type": "keys", "on": [k for k, v in self.keys_pending.items() if v],
+                   "off": [k for k, v in self.keys_pending.items() if not v]}
+            self.keys_pending = {k: False for k in self.keys_later}
+            self.keys_later = set()
+        self.keys_sent = now
+        for fn in list(self.listeners):
+            try:
+                fn(msg)
+            except Exception:
+                pass
 
     # --- running ---------------------------------------------------------------------------
     def run(self):
@@ -421,6 +508,7 @@ class Pianod:
             self.looper.poll()
             time.sleep(POLL)
             t = time.monotonic()
+            self._flush_keys(t)
             if t - last_push >= PUSH_EVERY:
                 self._push()
                 notify("WATCHDOG=1")

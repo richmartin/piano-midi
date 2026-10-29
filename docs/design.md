@@ -58,19 +58,46 @@ how this particular piano responds is in `calibration.json` instead (see the pla
 
 ## The panel (badge)
 
-One meaning per button, for enclosure labels: **A** = do music (play/pause; in Performance:
-record → close loop → overdub), **B** = stop (in Performance: end take / stop / play),
-**START** = shuffle everything (in Performance: save the take, named on the on-screen keyboard),
-**SELECT** = menu, d-pad = navigate (home: volume and prev/next). Layout maths live in
-`layout.py`, pure Python, tested on the laptop — including that every hint fits in 26 characters.
+A programme for the piano, not a file browser. The redesign (2026-10-29, mockups at
+https://claude.ai/artifact/RKDuDNzyUSPXWGkkHG3NaV) rests on four rules: the piano is the show
+(an 88-key strip lights up with every key the sensors report, on Now Playing, in Performance and
+as the calibration map); anything in six presses; say who's playing (a roll is a performance:
+"Mozart, played by Wanda Landowska, Duo-Art roll"); one meaning per button.
 
-The panel is the Pi's only screen, so it also does the network (from hotpi): **Network (WiFi)**
-shows the connection, state and IP, joins a network (password on the keyboard, with a symbols
-set), and shows NetworkManager's last log lines — the journal is in RAM, but readable while the
-Pi is up, which is how a failed join gets diagnosed without a monitor. A join that fails on a
-secured network is tried once more with management-frame protection off (the Pi 4's WiFi and
-WPA2/WPA3 transition networks). Long lists (composers, works, the log) come from pianod in pages
-under the panel's 4 KB line limit.
+**Buttons**, for enclosure labels: **A** = yes (play, choose, pause; *held*: star as a favourite;
+in Performance: record → close loop → overdub), **B** = back (on Now Playing: stop; in
+Performance: end take / stop / leave), **START** = Now Playing from anywhere and back (in
+Performance: save the take), **SELECT** = Settings from anywhere and back, d-pad = move (lists:
+left/right jump a section; Now Playing: volume and previous/next; Performance: undo/redo).
+
+**Screens**: Play Something (Surprise me, Composers, Pianists, Collections, Favourites, Your
+takes, Performance) → Composers by era, most works first → a composer (Play all, Shuffle, works
+with lengths, rolls marked with the pianist) · Pianists → a pianist's rolls · Collections, by
+rule (short pieces, nocturnes and slow pieces, dances and rags, showpieces and études, sonatas,
+rolls, long listens) · Now Playing · Performance (the loop as lanes, one per layer, recording in
+hammer-felt red) · Calibration (the keyboard as a map) · Settings (WiFi and its log, address,
+library, calibrate, mic, piano, link).
+
+**No flicker**: each screen's display tree is built once and its widgets only change what
+differs (`ui.py`); `auto_refresh` is off and the display is refreshed by hand, so only changed
+areas redraw. The first panel rebuilt the whole screen for every change.
+
+**Type**: EB Garamond (titles), Barlow Condensed (details; 14 px, where the 8 stops reading as a
+B) and Silkscreen (labels), as 1-bit PCF bitmap fonts made by `badge/tools/mkfonts.py` with the
+same renderer as the mockups. Palette: ebony, ivory, brass, hammer-felt red.
+
+**Live keys**: pianod batches every key the piano reports (playback and people alike) into
+`{"type": "keys", "on": [...], "off": [...]}` pushes, at most twenty a second; a key pressed and
+released within one batch still flashes. Long lists come from pianod in pages under the panel's
+4 KB line limit. Layout maths and text fitting live in `layout.py`, pure Python, tested on the
+laptop with the fonts' real widths (`badge/tests/font_widths.json`).
+
+The panel is also the Pi's only screen, so it does the network (from hotpi): Settings → WiFi
+shows the connection, joins a network (password on the keyboard, with a symbols set), and shows
+NetworkManager's last log lines (the journal is in RAM but readable while the Pi is up). A join
+that fails on a secured network is tried once more with PMF off. Raspberry Pi OS ships
+NetworkManager's own WiFi switch off until a country is set; the image switches it on, and
+pianod switches the radio on before any scan or join.
 
 ## The piano: Yamaha Disklavier "Wagon Grand", control wagon DKW10
 
@@ -217,6 +244,24 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
 - **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
   summary on the badge — including keys that changed noticeably since last time, which is how a
   failing solenoid or sensor gets noticed.
+
+## The library's home: piano.fam-mart.in (decided 2026-10-29)
+
+- **LAN only**, never on the internet: a local DNS record on the UDM pointing at murdoch, and an
+  Apache vhost restricted to LAN addresses, plain HTTP. murdoch-local owns the murdoch side
+  (DNS, vhost, deploy); zeus noted not to copy the websocket ProxyPass block from the
+  home.fam-mart.in vhost.
+- Its own docroot, `/var/www/piano.fam-mart.in`, same layout as today (`/library.json` at the
+  root, `/midi-files/<id>.mid`, the HTML). home.fam-mart.in stays frozen until retired.
+- Published on murdoch by a script: pull this repo, run `regenerate_library.py` on the MIDI
+  files (murdoch's gdrive mount) into the docroot. Today nothing regenerates the site: its
+  library.json dates from 2025-12-06.
+- The catalogue is tidied by `pianod/pianod/catalogue.py` (canonical composers with dates and
+  eras, pianists and roll systems, clean titles, lengths), used by both the generator and
+  pianod, so an old library.json still browses properly on the Pi.
+- The web player only controls the Pi and piano: the old remote-control features (a phone
+  driving a browser that played to the piano) and the Output Device selector go.
+- pianod's `PIANO_SERVER` changes to `http://piano.fam-mart.in` once it's live.
 
 ## Later (server side, not in this repo yet)
 

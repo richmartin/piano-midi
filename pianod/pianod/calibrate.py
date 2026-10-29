@@ -232,6 +232,7 @@ class Calibrator:
         self.done = 0
         self.started = clock()
         self.measuring_since: float | None = None
+        self.step = ""                     # what's being measured on the current key
         self.raw: dict[int, dict] = {}
         self.params: dict[int, dict] = {}
         self.flags: dict[int, list[str]] = {}
@@ -244,6 +245,8 @@ class Calibrator:
     def status(self) -> dict:
         s = {"phase": self.phase, "done": self.done, "of": len(self.keys),
              "key": key_name(self.key) if self.key is not None else None,
+             "step": self.step,
+             "keys": self.keymap(),
              "message": self.message,
              "flags": sum(len(f) for f in self.flags.values())}
         if self.phase == "waiting" and self.starts_at is not None:
@@ -252,6 +255,14 @@ class Calibrator:
             per_key = (self.clock() - self.measuring_since) / self.done
             s["eta"] = round(per_key * (len(self.keys) - self.done))
         return s
+
+    def keymap(self) -> str:
+        """The 88 keys for the panel's map: '.' to do, 'o' done, '!' flagged, '*' now."""
+        out = []
+        for k in KEYS:
+            out.append("*" if k == self.key else "!" if k in self.flags else
+                       "o" if k in self.params else ".")
+        return "".join(out)
 
     def run(self) -> None:
         try:
@@ -293,10 +304,14 @@ class Calibrator:
 
     def _measure(self, k: int) -> None:
         rig = self.rig
+        self.step = "velocity curve"
         curve = {v: rig.strike(k, v, CURVE_HOLD) for v in CURVE_V}
+        self.step = "pedal curve"
         curve_p, tries_p = self._pedal_curve(k)
+        self.step = "shortest note"
         md = {v: bisect(lambda h: rig.strike(k, v, h, listen=False).sensed is not None, *MD_RANGE)
               for v in MD_V}
+        self.step = "repeated notes"
         mr = bisect(lambda g: all(rig.restrike(k, MR_V, MR_HOLD, g) for _ in range(MR_TRIES)),
                     *MR_RANGE, steps=MR_STEPS)
         self.params[k], flags = key_params(curve, md, mr, curve_p)

@@ -59,9 +59,10 @@ def test_unknown_command_fails_loudly(d):
 
 def test_browse(d):
     r = ok(d, "composers")
-    assert r["composers"] == [{"name": "Bach, J.S.", "slug": "bach-js", "works": 2}]
+    [bach] = r["composers"]                          # tidied by the catalogue on load
+    assert (bach["name"], bach["slug"], bach["era"], bach["works"]) == ("Johann Sebastian Bach", "bach-js", "baroque", 2)
     r = ok(d, "works", slug="bach-js")
-    assert [w["title"] for w in r["works"]] == ["Prelude", "Fugue"]
+    assert sorted(w["title"] for w in r["works"]) == ["Fugue", "Prelude"]
     r = d.handle({"cmd": "works", "slug": "nobody"})
     assert not r["ok"]
 
@@ -88,9 +89,9 @@ def test_play_composer_runs_the_queue_to_the_end(d):
                     and len([s for s in d.out.sent if s[0] == "on"]) == 2)
     ons = [s for s in d.out.sent if s[0] == "on"]
     # A flat file fits to the middle of the piano (sensor 62), sent as 57 by the default curve.
-    assert ons == [("on", 60, 57), ("on", 62, 57)]
+    assert sorted(ons) == [("on", 60, 57), ("on", 62, 57)]
     st = d.state()
-    assert st["title"] == "Fugue"
+    assert st["title"] == d.queue[-1]["title"]
 
 
 def test_play_ids_and_queue(d):
@@ -103,7 +104,7 @@ def test_play_ids_and_queue(d):
 def test_play_needs_a_target(d):
     r = d.handle({"cmd": "play"})
     assert not r["ok"]
-    assert "ids, slug or all" in r["error"]
+    assert "play needs ids, slug" in r["error"]
 
 
 def test_toggle_with_nothing_queued(d):
@@ -200,3 +201,29 @@ def test_a_delayed_calibration_fails_before_the_countdown_not_after(d, monkeypat
     assert wait_for(lambda: d.calib.finished, timeout=5)
     assert d.calib.phase == "failed" and d.calib.starts_at is None
     assert ok(d, "calibrate_summary")["lines"] == []
+
+
+def test_favourites_star_and_unstar_and_play(d):
+    assert ok(d, "fav", id="file-id-000002")["fav"] is True
+    assert [w["id"] for w in ok(d, "favourites")["works"]] == ["file-id-000002"]
+    assert ok(d, "shelves")["favourites"] == 1
+    ok(d, "play", favourites=True)
+    assert d.state()["fav"] is True
+    assert ok(d, "fav", id="file-id-000002")["fav"] is False
+    assert ok(d, "favourites")["works"] == []
+    assert not d.handle({"cmd": "fav", "id": "file-id-999999"})["ok"]
+
+
+def test_keys_go_to_the_panel_in_batches_and_short_notes_still_flash(d):
+    got = []
+    d.listeners.append(got.append)
+    d._key_moved(60, True)
+    d._key_moved(60, False)          # released within the batch
+    d._key_moved(64, True)
+    d._flush_keys(100.0)
+    d._flush_keys(100.01)            # too soon: nothing
+    d._flush_keys(100.1)
+    keys = [m for m in got if m.get("type") == "keys"]
+    assert keys[0] == {"type": "keys", "on": [60, 64], "off": []}
+    assert keys[1] == {"type": "keys", "on": [], "off": [60]}
+    assert len(keys) == 2

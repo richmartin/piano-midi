@@ -5,7 +5,12 @@ whole library is ~14 MB — so browsing and playing never touch the network. syn
 mirror from the server: library.json first, then any file the mirror is missing. Files are
 immutable by id (file-id-000123.mid), so "missing" is the only check needed.
 
-Layout under root/:  library.json, midi-files/file-id-*.mid, recordings/*.mid (our own takes).
+Layout under root/:  library.json, midi-files/file-id-*.mid, recordings/*.mid (our own takes),
+durations.json (each work's length, measured once).
+
+The catalogue is tidied (catalogue.tidy: canonical composers, eras, pianists, roll systems) when
+it's loaded, whether or not the server already did: a v1 library.json from an old server still
+browses by era and pianist.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ import re
 import urllib.parse
 import urllib.request
 
-from . import store
+from . import smf, store
 
 LOG = logging.getLogger("pianod")
 
@@ -27,22 +32,102 @@ def _default_fetch(url: str) -> bytes:
         return r.read()
 
 
+COLLECTIONS = [
+    # slug, name, rule on a work (its clean title and movement, its length, its pianist)
+    ("short", "Short pieces", lambda w, text: 0 < (w.get("duration") or 0) < 180),
+    ("quiet", "Nocturnes and slow pieces", lambda w, text: re.search(
+        r"nocturne|berceuse|lullaby|r[eê]verie|consolation|romance|el[eé]gie|elegy|adagio|andante|"
+        r"largo|lento|song|lied|barcarolle|pastoral|dream|tr[aä]umerei|clair de lune|serenade|"
+        r"gymnop|gnossienne|meditation|intermezzo", text)),
+    ("dances", "Dances and rags", lambda w, text: re.search(
+        r"waltz|valse|mazurka|polonaise|polka|\brag\b|ragtime|tango|habanera|minuet|menuet|gavotte|"
+        r"tarantell|bolero|danc|danse|march|jota|fandango|czardas|csardas|[eé]cossaise|l[aä]ndler|"
+        r"two-step|cakewalk|galop|sarabande|bourr[eé]e|gigue|allemande|courante", text)),
+    ("showpieces", "Showpieces and études", lambda w, text: re.search(
+        r"[eé]tude|study|rhapsod|toccata|scherzo|campanella|fantasi|fantasy|paraphrase|"
+        r"transcription|caprice|capriccio|variations|feux|fireworks|islamey|mephisto|presto", text)),
+    ("sonatas", "Sonatas", lambda w, text: "sonat" in text),
+    ("rolls", "Great pianists, on rolls", lambda w, text: bool(w.get("performer"))),
+    ("long", "Long listens", lambda w, text: (w.get("duration") or 0) >= 600),
+]
+
+
 class Library:
     def __init__(self, root: str):
         self.root = root
         self.composers: list[dict] = []
-        self._works: dict[str, dict] = {}       # id -> {id, title, url, composer}
+        self.pianists: list[dict] = []
+        self._works: dict[str, dict] = {}       # id -> the work, with its composer's names
         os.makedirs(os.path.join(root, "midi-files"), exist_ok=True)
         os.makedirs(os.path.join(root, "recordings"), exist_ok=True)
         self.load()
 
     def load(self) -> None:
         data = store.read_json(os.path.join(self.root, "library.json"), {"composers": []})
+        try:
+            from . import catalogue
+            data = catalogue.tidy(data, duration=self._durations(data))
+        except ImportError:
+            pass
+        except Exception:                     # a bad catalogue must never stop the piano playing
+            LOG.exception("couldn't tidy the catalogue; using it as it is")
         self.composers = data.get("composers", [])
+        self.pianists = data.get("pianists", [])
+        names = {p["slug"]: p for p in self.pianists}
         self._works = {}
         for c in self.composers:
             for w in c.get("works", []):
-                self._works[w["id"]] = {**w, "composer": c["name"]}
+                p = names.get(w.get("performer") or "")
+                self._works[w["id"]] = {**w, "composer": c["name"], "composer_short": c.get("short") or c["name"],
+                                        "composer_slug": c.get("slug"),
+                                        "performer_name": p["name"] if p else None,
+                                        "performer_short": p.get("short") if p else None}
+
+    def _durations(self, data: dict):
+        """work id -> seconds, measured from the MIDI file once and kept in durations.json."""
+        path = os.path.join(self.root, "durations.json")
+        known = store.read_json(path, {})
+        changed = False
+        for c in data.get("composers", []):
+            for w in c.get("works", []):
+                if w.get("id") in known or w.get("duration"):
+                    continue
+                try:
+                    events, _ = smf.load(self.path(w))
+                    known[w["id"]] = round(events[-1].time, 1) if events else 0.0
+                    changed = True
+                except (OSError, ValueError, IndexError, KeyError):
+                    continue
+        if changed:
+            store.write_json(path, known)
+        return known.get
+
+    # --- browsing ---------------------------------------------------------------------------
+    def composer_list(self) -> list[dict]:
+        return [{k: c.get(k) for k in ("name", "slug", "short", "first", "sort", "born", "died", "era")}
+                | {"works": len(c.get("works", []))} for c in self.composers]
+
+    def pianist_list(self) -> list[dict]:
+        return [{k: p.get(k) for k in ("name", "slug", "short", "born", "died")} | {"works": len(p.get("works", []))}
+                for p in sorted(self.pianists, key=lambda p: -len(p.get("works", [])))]
+
+    def pianist_works(self, slug: str) -> list[dict]:
+        for p in self.pianists:
+            if p["slug"] == slug:
+                return [self._works[i] for i in p.get("works", []) if i in self._works]
+        raise ValueError(f"no such pianist {slug!r}")
+
+    def collections(self) -> list[dict]:
+        return [{"slug": slug, "name": name, "count": len(self.collection(slug))}
+                for slug, name, _ in COLLECTIONS if self.collection(slug)]
+
+    def collection(self, slug: str) -> list[dict]:
+        rule = next((r for s, _, r in COLLECTIONS if s == slug), None)
+        if rule is None:
+            raise ValueError(f"no such collection {slug!r}")
+        out = [w for w in self._works.values()
+               if rule(w, (w["title"] + " " + (w.get("original") or "")).lower())]
+        return sorted(out, key=lambda w: (w.get("composer_short") or "", w["title"]))
 
     # --- lookups ------------------------------------------------------------------------
     def work(self, work_id: str) -> dict:
@@ -56,7 +141,7 @@ class Library:
     def works_of(self, slug: str) -> list[dict]:
         for c in self.composers:
             if c.get("slug") == slug:
-                return [{**w, "composer": c["name"]} for w in c.get("works", [])]
+                return [self._works[w["id"]] for w in c.get("works", [])]
         raise ValueError(f"no such composer {slug!r}")
 
     def all_works(self) -> list[dict]:

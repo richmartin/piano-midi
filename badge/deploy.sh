@@ -8,7 +8,7 @@
 # Runs the layout tests first: the badge is usually on the piano, where nobody is watching it.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-FILES=(boot.py code.py layout.py texts.py)
+FILES=(boot.py code.py layout.py texts.py ui.py)
 
 python3 -m pytest -q "$HERE/tests" >/dev/null || { echo "layout tests fail; not deploying" >&2; exit 1; }
 python3 -m py_compile "$HERE"/CIRCUITPY/*.py
@@ -18,11 +18,12 @@ if [ $# -eq 0 ]; then
   [ -n "$dest" ] || { echo "no CIRCUITPY drive mounted here" >&2; exit 1; }
   for f in "${FILES[@]}"; do cp "$HERE/CIRCUITPY/$f" "$dest/"; done
   cp -r "$HERE/CIRCUITPY/lib/." "$dest/lib/"
+  mkdir -p "$dest/fonts" && cp "$HERE/CIRCUITPY/fonts/"*.pcf "$dest/fonts/"
   sync
   echo "deployed to $dest"
 else
   host=$1
-  tar -C "$HERE/CIRCUITPY" -cf - "${FILES[@]}" lib | ssh "$host" '
+  tar -C "$HERE/CIRCUITPY" -cf - "${FILES[@]}" lib fonts | ssh "$host" '
     set -e
     tmp=$(mktemp -d); trap "rm -rf $tmp" EXIT
     tar -C "$tmp" -xf -
