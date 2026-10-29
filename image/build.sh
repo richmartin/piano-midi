@@ -245,7 +245,7 @@ say "built $IMG ($(du -h "$IMG" | cut -f1))"
 if [ "${1:-}" = "--write" ]; then
   DEV=${2:?usage: build.sh --write /dev/sdX}
   [ -b "$DEV" ] || die "$DEV isn't a block device"
-  [ "$(lsblk -dno RM "$DEV")" = 1 ] || die "$DEV isn't removable; refusing"
+  [ "$(lsblk -dno RM "$DEV" | tr -d " ")" = 1 ] || die "$DEV isn't removable; refusing"
   lsblk -o NAME,SIZE,MODEL,LABEL,MOUNTPOINTS "$DEV"
   read -r -p "Erase $DEV and write PianoPi to it? Type 'yes': " ok
   [ "$ok" = yes ] || die "not written"

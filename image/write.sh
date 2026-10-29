@@ -13,8 +13,8 @@ die() { printf 'write.sh: %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run with sudo"
 [ -s "$IMG" ] || die "no image at $IMG (run image/build.sh first)"
 [ -b "$DEV" ] || die "$DEV isn't a block device"
-[ "$(lsblk -dno TYPE "$DEV")" = disk ] || die "$DEV is a partition; give the whole card (e.g. /dev/sda)"
-[ "$(lsblk -dno RM "$DEV")" = 1 ] || die "$DEV isn't removable; refusing"
+[ "$(lsblk -dno TYPE "$DEV" | tr -d " ")" = disk ] || die "$DEV is a partition; give the whole card (e.g. /dev/sda)"
+[ "$(lsblk -dno RM "$DEV" | tr -d " ")" = 1 ] || die "$DEV isn't removable; refusing"
 img_bytes=$(stat -c %s "$IMG"); dev_bytes=$(blockdev --getsize64 "$DEV")
 [ "$dev_bytes" -ge "$img_bytes" ] || die "$DEV is smaller than the image"
 
