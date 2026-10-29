@@ -1,7 +1,7 @@
 import json
 
 from pianod import calibration
-from pianod.calibrate import (MARGIN, Calibrator, Cancelled, Interrupted, PreflightFailed,
+from pianod.calibrate import (MARGIN, MR_MARGIN, Calibrator, Cancelled, Interrupted, PreflightFailed,
                               Strike, bisect, compare, key_params, loudness_suspects)
 from pianod.calibration import Calibration
 
@@ -69,7 +69,7 @@ def test_a_full_run_recovers_the_simulated_piano():
     for v, md in p["md"]:
         truth = FakePiano().md_true(50, v)
         assert truth <= md - MARGIN + 1e-9 < truth + 0.01
-    assert abs(p["mr"] - MARGIN - 0.06) < 0.01
+    assert 0.06 <= p["mr"] - MR_MARGIN < 0.06 + 0.016          # 4 steps over 250 ms
     assert p["l_off"] == 0.048
     # The velocity fit inverts the sensor: asking for what velocity 60 reads gives back ~60.
     cal = c.calibration()
@@ -185,3 +185,16 @@ def test_probe_mic_reports_why_not(monkeypatch):
     monkeypatch.setattr(calibrate.subprocess, "run", lambda *a, **k: Done(b"\x10\x00" * 8000))
     r = calibrate.probe_mic()
     assert r["ok"] and r["name"] == "USB mic"
+
+
+def test_a_restrike_gap_that_only_sometimes_works_is_not_taken():
+    class Flaky(FakePiano):
+        calls = 0
+
+        def restrike(self, k, v, hold, gap):
+            # Reliable from 60 ms; from 30 ms, one try in two.
+            self.calls += 1
+            return gap >= 0.06 or (gap >= 0.03 and self.calls % 2 == 0)
+
+    c = run(Flaky(), keys=(60,))
+    assert c.params[60]["mr"] - MR_MARGIN >= 0.06

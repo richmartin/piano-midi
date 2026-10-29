@@ -181,6 +181,11 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   / 60; re-strike gap only 40–45 ms. **Velocity saturates at 100**: 127 plays no louder, so the
   velocity fit ignores the flat top. On a laptop the first capture device may be an empty
   headset socket — `PIANO_MIC=default` there; preflight catches it.
+- **Re-strikes are measured with the sustain pedal down, 3 tries out of 3.** The first full
+  run (single tries, no pedal, 15 ms margin) gave F4 an mr of 38 ms, and the Gnossienne then
+  lost 19 of 74 pedalled F4 re-strikes at exactly that gap. On F4 a 30 ms re-strike sounds 4/4
+  without the pedal and 0/4 with it; 40 ms sounds 4/4 either way. Now F4 measures 77 ms
+  (30 ms margin). That costs time: ~33 s a key, ~48 minutes for all 88.
 - **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
   summary on the badge — including keys that changed noticeably since last time, which is how a
   failing solenoid or sensor gets noticed.

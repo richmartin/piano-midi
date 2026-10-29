@@ -6,7 +6,9 @@ For each of the 88 keys (docs/design.md, "Calibrate"):
             the strike took (-> l_on per velocity) and the release (-> l_off), and how loud the
             mic heard it (a cross-check on the sensor)
   md        at each of MD_V, the shortest hold that still sounds, by bisection
-  mr        the shortest gap after a note-off before the key can sound again, by bisection
+  mr        the shortest gap after a note-off before the key can sound again, by bisection —
+            with the sustain pedal down (the harder case: on F4, 30 ms works without the pedal
+            and never with it), and only counted when MR_TRIES in a row sound
 
 A note "sounded" when the key sensors report it — the sweep on 2026-10-29 found they report a
 strike exactly when the hammer lands. The mic only cross-checks loudness: a key whose loudness
@@ -44,9 +46,10 @@ CURVE_V = (12, 20, 30, 45, 60, 80, 100, 127)
 CURVE_HOLD = 0.40
 MD_V = (15, 30, 60)
 MD_RANGE = (0.010, 0.250)
-MR_V, MR_HOLD, MR_RANGE = 40, 0.20, (0.0, 0.250)
+MR_V, MR_HOLD, MR_RANGE, MR_TRIES, MR_STEPS = 30, 0.30, (0.0, 0.250), 3, 4
 STEPS = 5                      # bisection steps: ~8 ms resolution over 250 ms
 MARGIN = 0.015                 # added to md and mr: measured on the edge is not safe
+MR_MARGIN = 0.030              # mr's edge is sharper: 38 ms on F4 lost a quarter of re-strikes
 IDLE_AFTER_PLAYING = 20.0      # seconds of quiet keys before carrying on after an interruption
 NAMES = "C C# D D# E F F# G G# A A# B".split()
 
@@ -133,9 +136,9 @@ def key_params(curve: dict, md: dict, mr: float | None) -> tuple[dict, list[str]
         p["md"].append([v, round(h + MARGIN, 4)])
     if mr is None:
         flags.append(f"a re-strike {MR_RANGE[1] * 1000:.0f} ms after release never sounded")
-        p["mr"] = MR_RANGE[1] + MARGIN
+        p["mr"] = MR_RANGE[1] + MR_MARGIN
     else:
-        p["mr"] = round(mr + MARGIN, 4)
+        p["mr"] = round(mr + MR_MARGIN, 4)
     return p, flags
 
 
@@ -260,7 +263,8 @@ class Calibrator:
         curve = {v: rig.strike(k, v, CURVE_HOLD) for v in CURVE_V}
         md = {v: bisect(lambda h: rig.strike(k, v, h, listen=False).sensed is not None, *MD_RANGE)
               for v in MD_V}
-        mr = bisect(lambda g: rig.restrike(k, MR_V, MR_HOLD, g), *MR_RANGE)
+        mr = bisect(lambda g: all(rig.restrike(k, MR_V, MR_HOLD, g) for _ in range(MR_TRIES)),
+                    *MR_RANGE, steps=MR_STEPS)
         self.params[k], flags = key_params(curve, md, mr)
         if flags:
             self.flags[k] = flags
@@ -390,8 +394,9 @@ class MidiRig:
         if self.cancel.wait(max(0.0, seconds)):
             raise Cancelled()
 
-    def _collect(self, key: int, until: float, got: list) -> None:
-        """Gather this key's sensor events until `until`; anything else means someone's playing."""
+    def _collect(self, key: int, until: float, got: list, pedal: bool = False) -> None:
+        """Gather this key's sensor events until `until`; anything else means someone's playing
+        (but with `pedal`, sustain-pedal reports are ours: restrike holds it down)."""
         while True:
             if self.cancel.is_set():
                 raise Cancelled()
@@ -401,6 +406,8 @@ class MidiRig:
             try:
                 t, kind, a, b = self.q.get(timeout=min(left, 0.05))
             except queue.Empty:
+                continue
+            if pedal and kind == "cc" and a == 64:
                 continue
             if kind == "cc" or a != key:
                 raise Interrupted(f"{key_name(a)}" if kind != "cc" else "a pedal")
@@ -444,21 +451,26 @@ class MidiRig:
         return s
 
     def restrike(self, key: int, vel: int, hold: float, gap: float) -> bool:
-        """A note, released, then the same key `gap` later: did the second one sound?"""
+        """With the sustain pedal down: a note, released, then the same key `gap` later.
+        Did the second one sound?"""
         self._settle()
         got: list = []
+        self.out.cc(64, 127)
+        self._collect(key, self.clock() + 0.1, got, pedal=True)
         t0 = self.clock()
         self.out.note_on(key, vel)
-        self._collect(key, t0 + hold, got)
+        self._collect(key, t0 + hold, got, pedal=True)
         self.out.note_off(key)
         t1 = self.clock()
-        self._collect(key, t1 + gap, got)
+        self._collect(key, t1 + gap, got, pedal=True)
         self.out.note_on(key, vel)
         t2 = self.clock()
-        self._collect(key, t2 + hold, got)
+        self._collect(key, t2 + hold, got, pedal=True)
         self.out.note_off(key)
+        self._collect(key, self.clock() + 0.25, got, pedal=True)
+        self.out.cc(64, 0)
         self.last_off = self.clock()
-        self._collect(key, self.last_off + 0.35, got)
+        self._collect(key, self.last_off + 0.15, got, pedal=True)
         return sum(1 for _, kind, _ in got if kind == "on") >= 2
 
     def wait_idle(self, seconds: float) -> None:
