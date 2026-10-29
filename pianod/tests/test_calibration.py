@@ -97,39 +97,25 @@ class TestRender:
         assert sent_for(r, 60, "on")[0].time >= 1.0 - LEAD - 1e-9
 
 
-class TestChords:
-    CHORD = {"1": [[35, 8], [60, 2]], "2": [[35, 14], [60, 4]]}
+class TestPedal:
+    KEY = {"60": {"sv_p": 1.0, "mv_p": 5.0, "v_min_p": 30}}
 
-    def test_no_table_no_correction(self):
+    def test_a_note_under_the_pedal_uses_the_pedal_curve(self):
+        cal = Calibration(self.KEY)
+        ev = sorted(notes((60, 1, 1.5, 40), (60, 3, 3.5, 40))
+                    + [Event("cc", 2, 64, 127), Event("cc", 4, 64, 0)], key=lambda e: e.time)
+        on = [s.b for s in cal.render(ev, AS_IS) if s.kind == "on"]
+        assert on == [cal.velocity(60, 40), max(cal.velocity(60, 40), 30, round(40 * 1.0 + 5))]
+        assert on[1] > on[0]
+
+    def test_whichever_asks_for_more(self):
+        cal = Calibration(self.KEY)
+        assert cal.velocity(60, 100, pedal=True) == cal.velocity(60, 100)
+        assert cal.velocity(60, 1, pedal=True) == 30                     # its own floor
+
+    def test_no_pedal_curve_no_change(self):
         cal = Calibration()
-        r = cal.render(notes((60, 1, 2, 40), (64, 1, 2, 40)), AS_IS)
-        assert {s.b for s in r if s.kind == "on"} == {cal.velocity(60, 40)}
-
-    def test_a_soft_chord_is_sent_louder_than_the_same_notes_alone(self):
-        cal = Calibration(chord=self.CHORD)
-        alone = cal.render(notes((60, 1, 2, 35), (64, 3, 4, 35)), AS_IS)
-        pair = cal.render(notes((60, 1, 2, 35), (64, 1, 2, 35)), AS_IS)
-        triad = cal.render(notes((60, 1, 2, 35), (64, 1, 2, 35), (67, 1, 2, 35)), AS_IS)
-        on = lambda r, k: sent_for(r, k, "on")[0].b                  # noqa: E731
-        assert on(alone, 60) == cal.velocity(60, 35)
-        assert on(pair, 60) == cal.velocity(60, 35 + 8)
-        assert on(triad, 60) == cal.velocity(60, 35 + 14)
-
-    def test_more_others_than_measured_use_the_most_measured(self):
-        cal = Calibration(chord=self.CHORD)
-        assert cal.chord_loss(5, 35) == 14
-        assert cal.chord_loss(1, 47.5) == 5                  # between the points
-
-    def test_the_window_is_in_send_time(self):
-        # A soft note and a loud one meant to sound together go out ~65 ms apart: no company.
-        cal = Calibration(chord=self.CHORD)
-        r = cal.render(notes((60, 1, 2, 35), (64, 1, 2, 100)), AS_IS)
-        assert sent_for(r, 60, "on")[0].b == cal.velocity(60, 35)
-
-    def test_saved_and_loaded(self, tmp_path):
-        path = tmp_path / "c.json"
-        path.write_text(json.dumps(Calibration(chord=self.CHORD).to_json()))
-        assert calibration.load(str(path)).chord_loss(2, 35) == 14
+        assert cal.velocity(60, 40, pedal=True) == cal.velocity(60, 40)
 
 
 class TestFileLoudness:

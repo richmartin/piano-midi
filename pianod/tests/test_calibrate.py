@@ -1,9 +1,8 @@
 import json
 
 from pianod import calibration
-from pianod.calibrate import (MARGIN, MR_MARGIN, SENSOR_FLOOR, Calibrator, Cancelled, Interrupted,
-                              PreflightFailed, Strike, bisect, chord_losses, compare, key_params,
-                              loudness_suspects)
+from pianod.calibrate import (MARGIN, MR_MARGIN, Calibrator, Cancelled, Interrupted, PreflightFailed,
+                              Strike, bisect, compare, key_params, loudness_suspects)
 from pianod.calibration import Calibration
 
 
@@ -22,8 +21,10 @@ class FakePiano:
         base = 0.140 - v * 0.0015
         return base + (0.04 if k == 48 else 0.0)
 
-    def sensor(self, k, v):
-        return round(0.68 * v + 23) - (12 if k == 48 else 0)
+    def sensor(self, k, v, pedal=False):
+        # With the pedal down a soft note strikes weaker; at 60 and above, no different.
+        loss = max(0.0, 60 - v) * (0.5 if k == 48 else 0.3) if pedal else 0.0
+        return round(0.68 * v + 23 - loss) - (12 if k == 48 else 0)
 
     def sleep(self, seconds):
         if self.cancel_in_delay:
@@ -34,37 +35,28 @@ class FakePiano:
             raise PreflightFailed(self.fail_preflight)
         return {"mic": "fake"}
 
-    def strike(self, k, v, hold, listen=True):
+    def strike(self, k, v, hold, listen=True, pedal=False):
         self.strikes += 1
         if self.interrupt_at == (k, self.strikes):
             self.interrupt_at = None
             raise Interrupted("C4")
         if hold < self.md_true(k, v):
             return Strike()
-        s = self.sensor(k, v)
+        s = self.sensor(k, v, pedal)
+        if s < 20:
+            return Strike()
         return Strike(sensed=s, l_on=0.2 - v * 0.001, l_off=0.048,
                       db=(10 + 0.5 * (s + (12 if k == 48 else 0))) if listen else None)
 
     def restrike(self, k, v, hold, gap):
         return gap >= 0.06
 
-    def chord_loss(self, others, v):
-        # Each other solenoid costs a soft note more than a loud one; nothing at 70 and above.
-        return others * 5 * max(0, 70 - v) / 50
-
-    def chord(self, keys, v, hold):
-        out = {}
-        for k in keys:
-            s = self.sensor(k, v) - self.chord_loss(len(keys) - 1, v)
-            out[k] = round(s) if s >= 33 else None
-        return out
-
     def wait_idle(self, seconds):
         self.waited_idle += 1
 
 
-def run(piano, keys=(47, 48, 49, 50, 51), chord_keys=(60, 72), **kw):
-    c = Calibrator(piano, keys=keys, chord_keys=chord_keys, **kw)
+def run(piano, keys=(47, 48, 49, 50, 51), **kw):
+    c = Calibrator(piano, keys=keys, **kw)
     c.run()
     return c
 
@@ -131,7 +123,7 @@ def test_preflight_runs_before_the_countdown_and_again_after():
             t[0] += 90
             seen.append(("later", c.status()["starts_in"]))
 
-    c = Calibrator(Piano(), keys=(60,), delay=600, clock=lambda: t[0], chord_keys=())
+    c = Calibrator(Piano(), keys=(60,), delay=600, clock=lambda: t[0])
     assert c.status()["phase"] == "preflight"
     c.run()
     assert seen == [("preflight", "preflight"), ("countdown", 600), ("later", 510),
@@ -212,44 +204,21 @@ def test_a_restrike_gap_that_only_sometimes_works_is_not_taken():
     assert c.params[60]["mr"] - MR_MARGIN >= 0.06
 
 
-def test_the_chord_stage_measures_what_company_costs():
+def test_the_pedal_curve_asks_more_of_soft_notes():
     c = run(FakePiano())
-    piano = FakePiano()
     cal = c.calibration()
-    for n, v in ((1, 30), (2, 30), (1, 45), (2, 45), (3, 45)):    # all sound in company
-        alone = piano.sensor(60, v)
-        assert abs(cal.chord_loss(n, alone) - piano.chord_loss(n, v)) < 1.5
-    assert cal.chord_loss(2, piano.sensor(60, 60)) < cal.chord_loss(2, piano.sensor(60, 20))
-    assert cal.chord_loss(0, 40) == 0
+    piano = FakePiano()
+    for k in (48, 50):
+        # Asking for what velocity 45 reads with the pedal down gives back ~45.
+        assert abs(cal.velocity(k, piano.sensor(k, 45, pedal=True), pedal=True) - 45) <= 2
+        assert cal.velocity(k, 40, pedal=True) > cal.velocity(k, 40)
+        assert cal.velocity(k, 100, pedal=True) == cal.velocity(k, 100)   # loud: no different
+    assert c.params[48]["v_min_p"] == 45 and c.params[50]["v_min_p"] == 20   # the fake's floors
 
 
-def test_a_note_that_misses_in_company_counts_as_falling_to_the_floor():
-    raw = {60: {20: [{"alone": 36, "with": [30, None, None]}]}}
-    chord = chord_losses(raw)
-    assert chord[1] == [[36, 6.0]]
-    assert chord[2] == [[36, 36 - SENSOR_FLOOR]]
-
-
-def test_someone_playing_during_the_chords_pauses_them():
-    class Piano(FakePiano):
-        chords = 0
-
-        def chord(self, keys, v, hold):
-            self.chords += 1
-            if self.chords == 5:
-                raise Interrupted("D2")
-            return super().chord(keys, v, hold)
-
-    piano = Piano()
-    c = run(piano, keys=(50,), chord_keys=(60,))
-    assert c.phase == "done" and piano.waited_idle == 1 and 1 in c.chord
-
-
-def test_the_chords_are_saved_and_summarised(tmp_path):
-    c = run(FakePiano())
-    summary = c.save(str(tmp_path), Calibration())
-    assert any(s.startswith("chords: with 2 others") for s in summary)
-    back = calibration.load(str(tmp_path / "calibration.json"))
-    assert back.chord == c.chord
-    raw = json.loads(next(tmp_path.glob("calibration-raw-*.json")).read_text())
-    assert set(raw["chords"]) == {"60", "72"}
+def test_a_note_silent_with_the_pedal_sets_the_floor_above_it():
+    curve = {v: Strike(sensed=round(0.68 * v + 23), l_on=0.1) for v in (12, 20, 30, 45, 60)}
+    curve_p = {12: Strike(), 20: Strike(sensed=25), 30: Strike(), 45: Strike(sensed=45),
+               60: Strike(sensed=62)}
+    p, _ = key_params(curve, {}, 0.05, curve_p)
+    assert p["v_min_p"] == 45                    # 20 sounded once, but 30 didn't: not reliable

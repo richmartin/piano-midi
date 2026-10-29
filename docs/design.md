@@ -145,9 +145,9 @@ Every note goes through two independent stages before it reaches the piano:
      notes; then enforce `max(md(ov, k), …)` on it.
    - **Re-strike**: a key needs `mr(k)` after its note-off before it can sound again; if the next
      note-on comes sooner, shorten the previous note rather than lose the new one.
-   - **Chords**: the solenoids share one supply, so a note sent with others (within 40 ms of
-     send time) strikes weaker. It is asked for `iv + chord_loss(n, iv)` instead, where `n` is
-     how many others go with it. One table for the whole piano, measured by the calibration.
+   - **Pedal**: with the sustain pedal down, soft notes strike much weaker, so a note that strikes
+     under the pedal uses the key's pedal curve (`sv_p`, `mv_p`, floor `v_min_p`) when that asks
+     for more than the plain one.
 
 Because events now leave early by different amounts, the player looks ahead by the largest
 latency (~200 ms) and sends in *send-time* order, not sound-time order. The calibration is one
@@ -188,16 +188,16 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   run (single tries, no pedal, 15 ms margin) gave F4 an mr of 38 ms, and the Gnossienne then
   lost 19 of 74 pedalled F4 re-strikes at exactly that gap. On F4 a 30 ms re-strike sounds 4/4
   without the pedal and 0/4 with it; 40 ms sounds 4/4 either way. Now F4 measures 77 ms
-  (30 ms margin). That costs time: ~33 s a key, ~48 minutes for all 88.
-- **Chords, after the 88 keys**: on 8 keys from C2 to G5, at sent velocities 20 / 30 / 45 / 60,
-  the note alone and then with 1, 2 and 3 others (a fifth, a third, an octave) at the same
-  velocity, twice each — ~6 minutes. The loss is the mean drop in the sensor reading against
-  alone, a miss counting as a fall to the floor, so the correction covers misses too. Found
-  because, after the second full calibration, the Gnossienne still lost 23 of 980 notes, all
-  soft accompaniment in chords: soft notes alone read 5 under what was wanted and never missed;
-  with 1 other, 12 under and 3% missed; with 2 or more, 17 under and 4% missed. Loud notes never
-  missed. (The uncalibrated defaults lost only 2: they sent soft notes louder than needed, which
-  happened to cover the loss.)
+  (30 ms margin). That costs time: ~33 s a key, ~48 minutes for all 88 (~55 with the pedal curve).
+- **With the pedal down, per key**: the curve again at 12 / 20 / 30 / 45 / 60, pedal held,
+  sensor only (lifting the dampers is noisy). Found because, after the second full calibration,
+  the Gnossienne still lost 23 of 980 notes, all soft accompaniment. Notes fired together were
+  the first suspect, but measured alone they cost 0–1 sensor units and never missed (192 notes in
+  chords of 2–4). The pedal was it: in the Gnossienne, soft notes under the pedal missed 9%
+  (without it, 1%). Measured on its own, C3 never sounds at 20–25 with the pedal down and
+  only weakly at 30; the mic hears it 15–20 dB quieter (at 45 only ~3 dB); C4 at 20 is ~10 dB
+  quieter. Other keys held down cost 2–3 sensor units. Why the pedal weakens the hammers isn't
+  known: perhaps the pedal solenoid, held on, loads the supply they share.
 - **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
   summary on the badge — including keys that changed noticeably since last time, which is how a
   failing solenoid or sensor gets noticed.

@@ -5,16 +5,12 @@ For each of the 88 keys (docs/design.md, "Calibrate"):
   curve     a held note at each of CURVE_V: what the key sensors report (-> sv, mv), how long
             the strike took (-> l_on per velocity) and the release (-> l_off), and how loud the
             mic heard it (a cross-check on the sensor)
+  pedal     a held note at each of CURVE_P_V with the sustain pedal down: soft notes strike
+            weaker then (-> sv_p, mv_p, and v_min_p, the least velocity that still sounds)
   md        at each of MD_V, the shortest hold that still sounds, by bisection
   mr        the shortest gap after a note-off before the key can sound again, by bisection —
             with the sustain pedal down (the harder case: on F4, 30 ms works without the pedal
             and never with it), and only counted when MR_TRIES in a row sound
-
-Then, once, on a few keys across the keyboard:
-
-  chords    a note at each of CHORD_V alone, then with 1, 2 and 3 others at the same velocity:
-            how much quieter the sensor reads it in company (-> chord, for every key). Soft
-            notes in the Gnossienne's chords came out 12-17 weaker than alone, and 4% missed.
 
 A note "sounded" when the key sensors report it — the sweep on 2026-10-29 found they report a
 strike exactly when the hammer lands. The mic only cross-checks loudness: a key whose loudness
@@ -50,17 +46,13 @@ LOG = logging.getLogger("pianod")
 KEYS = range(21, 109)
 CURVE_V = (12, 20, 30, 45, 60, 80, 100, 127)
 CURVE_HOLD = 0.40
+CURVE_P_V = (12, 20, 30, 45, 60)       # above 60 the pedal costs little: the plain curve rules
 MD_V = (15, 30, 60)
 MD_RANGE = (0.010, 0.250)
 MR_V, MR_HOLD, MR_RANGE, MR_TRIES, MR_STEPS = 30, 0.30, (0.0, 0.250), 3, 4
 STEPS = 5                      # bisection steps: ~8 ms resolution over 250 ms
 MARGIN = 0.015                 # added to md and mr: measured on the edge is not safe
 MR_MARGIN = 0.030              # mr's edge is sharper: 38 ms on F4 lost a quarter of re-strikes
-CHORD_KEYS = (36, 43, 48, 55, 60, 67, 72, 79)
-CHORD_WITH = (7, 4, 12)        # the others, in semitones above: a fifth, a third, an octave
-CHORD_V, CHORD_TRIES, CHORD_HOLD = (20, 30, 45, 60), 2, 0.40
-CHORD_STRIKE_S = 1.3           # roughly, per chord or note: for the time estimate
-SENSOR_FLOOR = 27              # the quietest any key reads (12 on C4): a note that missed
 IDLE_AFTER_PLAYING = 20.0      # seconds of quiet keys before carrying on after an interruption
 NAMES = "C C# D D# E F F# G G# A A# B".split()
 
@@ -116,20 +108,40 @@ def fit_line(points):
     return a, my - a * mx
 
 
-def key_params(curve: dict, md: dict, mr: float | None) -> tuple[dict, list[str]]:
-    """One key's measurements -> its calibration parameters, and anything worth flagging."""
-    p, flags = {}, []
-    # Velocity: send = sv * sensed + mv, fitted where the sensor still moves — above the floor,
-    # and below the top (on the DKW10, 127 plays no louder than 100).
+def fit_velocity(curve: dict) -> tuple[float, float] | None:
+    """send = sv * sensed + mv, fitted where the sensor still moves — above the floor, and
+    below the top (on the DKW10, 127 plays no louder than 100)."""
     pts = []
     for v, s in sorted(curve.items()):
         if s.sensed and v >= 20 and (not pts or s.sensed > pts[-1][0]):
             pts.append((s.sensed, v))
     line = fit_line(pts)
-    if line and line[0] > 0:
-        p["sv"], p["mv"] = round(line[0], 4), round(line[1], 2)
+    return (round(line[0], 4), round(line[1], 2)) if line and line[0] > 0 else None
+
+
+def key_params(curve: dict, md: dict, mr: float | None,
+               curve_p: dict | None = None) -> tuple[dict, list[str]]:
+    """One key's measurements -> its calibration parameters, and anything worth flagging."""
+    p, flags = {}, []
+    line = fit_velocity(curve)
+    if line:
+        p["sv"], p["mv"] = line
     else:
         flags.append("velocity: no usable curve, defaults kept")
+    if curve_p:
+        line = fit_velocity(curve_p)
+        sounding = [v for v, s in sorted(curve_p.items()) if s.sensed]
+        if line and sounding:
+            p["sv_p"], p["mv_p"] = line
+            # the least velocity from which every louder one sounded too
+            v_min = max(sounding)
+            for v in sorted(curve_p, reverse=True):
+                if not curve_p[v].sensed:
+                    break
+                v_min = v
+            p["v_min_p"] = v_min
+        else:
+            flags.append("with the pedal down: no usable curve")
     l_on = [[v, round(s.l_on, 4)] for v, s in sorted(curve.items()) if s.l_on is not None]
     if l_on:
         p["l_on"] = l_on
@@ -172,40 +184,6 @@ def loudness_suspects(raw: dict, limit_db: float = 4.0) -> dict[int, str]:
     return out
 
 
-def chord_losses(raw: dict) -> dict[int, list]:
-    """The chord stage's strikes -> Calibration.chord: for each number of others, the mean
-    loss at each velocity, against the median alone reading. A miss counts as falling to the
-    floor, so the correction covers misses as well as weak strikes."""
-    out = {}
-    for n in range(1, len(CHORD_WITH) + 1):
-        pts = []
-        for v in CHORD_V:
-            pairs = [(t["alone"], t["with"][n - 1]) for r in raw.values() for t in r.get(v, [])
-                     if t["alone"]]
-            if not pairs:
-                continue
-            losses = [a - (w if w else SENSOR_FLOOR) for a, w in pairs]
-            pts.append([statistics.median(a for a, _ in pairs),
-                        round(max(0.0, statistics.fmean(losses)), 1)])
-        pts.sort()
-        if pts:
-            out[n] = pts
-    return out
-
-
-def chord_summary(chord: dict[int, list], raw: dict) -> list[str]:
-    misses = sum(1 for r in raw.values() for ts in r.values() for t in ts for w in t["with"]
-                 if not w)
-    total = sum(len(t["with"]) for r in raw.values() for ts in r.values() for t in ts)
-    lines = []
-    for n, pts in chord.items():
-        lines.append(f"chords: with {n} other{'s' if n > 1 else ''}, a note loses " +
-                     ", ".join(f"{loss:.0f} at {a:.0f}" for a, loss in pts))
-    if total:
-        lines.append(f"chords: {misses} of {total} notes in company missed")
-    return lines
-
-
 def compare(old: Calibration, new: Calibration) -> list[str]:
     """Keys that moved noticeably since the last calibration: how a failing part shows up."""
     changes = []
@@ -232,11 +210,9 @@ def compare(old: Calibration, new: Calibration) -> list[str]:
 
 # --- the run ---------------------------------------------------------------------------------
 class Calibrator:
-    def __init__(self, rig, keys=KEYS, delay: float = 0.0, clock=time.monotonic,
-                 chord_keys=CHORD_KEYS):
+    def __init__(self, rig, keys=KEYS, delay: float = 0.0, clock=time.monotonic):
         self.rig = rig
         self.keys = list(keys)
-        self.chord_keys = list(chord_keys)
         self.delay = delay
         self.clock = clock
         self.phase = "preflight"
@@ -247,8 +223,6 @@ class Calibrator:
         self.started = clock()
         self.measuring_since: float | None = None
         self.raw: dict[int, dict] = {}
-        self.chord_raw: dict[int, dict] = {}
-        self.chord: dict[int, list] = {}
         self.params: dict[int, dict] = {}
         self.flags: dict[int, list[str]] = {}
         self.info: dict = {}
@@ -266,9 +240,7 @@ class Calibrator:
             s["starts_in"] = max(0, round(self.starts_at - self.clock()))
         if self.measuring_since is not None and self.done and not self.finished:
             per_key = (self.clock() - self.measuring_since) / self.done
-            chords = len(self.chord_keys) - len(self.chord_raw)
-            s["eta"] = round(per_key * (len(self.keys) - self.done) + chords * len(CHORD_V)
-                             * CHORD_TRIES * (len(CHORD_WITH) + 1) * CHORD_STRIKE_S)
+            s["eta"] = round(per_key * (len(self.keys) - self.done))
         return s
 
     def run(self) -> None:
@@ -287,14 +259,16 @@ class Calibrator:
             self.measuring_since = self.clock()
             for k in self.keys:
                 self.key = k
-                self._retrying(lambda: self._measure(k))
+                while True:
+                    try:
+                        self._measure(k)
+                        break
+                    except Interrupted as e:
+                        self.phase, self.message = "paused", f"someone is playing ({e}); waiting"
+                        self.rig.wait_idle(IDLE_AFTER_PLAYING)
+                        self.phase, self.message = "measuring", ""
                 self.done += 1
             self.key = None
-            for k in self.chord_keys:
-                self.message = f"chords on {key_name(k)}"
-                self._retrying(lambda: self._measure_chords(k))
-            self.message = ""
-            self.chord = chord_losses(self.chord_raw)
             for k, why in loudness_suspects(self.raw).items():
                 self.flags.setdefault(k, []).append(why)
             self.info["finished"] = time.strftime("%Y-%m-%d %H:%M")
@@ -307,45 +281,23 @@ class Calibrator:
             LOG.exception("calibration failed")
             self.phase, self.message = "failed", f"{type(e).__name__}: {e}"
 
-    def _retrying(self, measure) -> None:
-        """Measure; if someone plays meanwhile, wait for quiet and measure again."""
-        message = self.message
-        while True:
-            try:
-                return measure()
-            except Interrupted as e:
-                self.phase, self.message = "paused", f"someone is playing ({e}); waiting"
-                self.rig.wait_idle(IDLE_AFTER_PLAYING)
-                self.phase, self.message = "measuring", message
-
-    def _measure_chords(self, k: int) -> None:
-        """Per velocity, CHORD_TRIES rounds of: alone, then with 1, 2, 3 others."""
-        out = {}
-        for v in CHORD_V:
-            out[v] = []
-            for _ in range(CHORD_TRIES):
-                alone = self.rig.chord([k], v, CHORD_HOLD)[k]
-                with_ = [self.rig.chord([k] + [k + d for d in CHORD_WITH[:n]], v, CHORD_HOLD)[k]
-                         for n in range(1, len(CHORD_WITH) + 1)]
-                out[v].append({"alone": alone, "with": with_})
-        self.chord_raw[k] = out
-
     def _measure(self, k: int) -> None:
         rig = self.rig
         curve = {v: rig.strike(k, v, CURVE_HOLD) for v in CURVE_V}
+        curve_p = {v: rig.strike(k, v, CURVE_HOLD, listen=False, pedal=True) for v in CURVE_P_V}
         md = {v: bisect(lambda h: rig.strike(k, v, h, listen=False).sensed is not None, *MD_RANGE)
               for v in MD_V}
         mr = bisect(lambda g: all(rig.restrike(k, MR_V, MR_HOLD, g) for _ in range(MR_TRIES)),
                     *MR_RANGE, steps=MR_STEPS)
-        self.params[k], flags = key_params(curve, md, mr)
+        self.params[k], flags = key_params(curve, md, mr, curve_p)
         if flags:
             self.flags[k] = flags
-        self.raw[k] = {"curve": {v: s.__dict__ for v, s in curve.items()}, "md": md, "mr": mr}
+        self.raw[k] = {"curve": {v: s.__dict__ for v, s in curve.items()},
+                       "curve_p": {v: s.__dict__ for v, s in curve_p.items()}, "md": md, "mr": mr}
 
     def calibration(self) -> Calibration:
         return Calibration(self.params, L_CC,
-                           {**self.info, "flags": {key_name(k): f for k, f in self.flags.items()}},
-                           self.chord)
+                           {**self.info, "flags": {key_name(k): f for k, f in self.flags.items()}})
 
     def save(self, data_dir: str, previous: Calibration) -> list[str]:
         """Write the new calibration (keeping the old), its raw data; return a summary."""
@@ -355,11 +307,13 @@ class Calibrator:
         if os.path.exists(current):
             shutil.copyfile(current, os.path.join(data_dir, f"calibration-before-{stamp}.json"))
         store.write_json(os.path.join(data_dir, f"calibration-raw-{stamp}.json"),
-                         {**{str(k): v for k, v in self.raw.items()},
-                          "chords": {str(k): v for k, v in self.chord_raw.items()}})
+                         {str(k): v for k, v in self.raw.items()})
         store.write_json(current, cal.to_json())
         summary = [f"{len(self.params)} keys calibrated"]
-        summary += chord_summary(self.chord, self.chord_raw)
+        extra = [cal.velocity(k, 40, pedal=True) - cal.velocity(k, 40) for k in cal.keys]
+        if extra:
+            summary.append(f"with the pedal down, a soft note needs velocity "
+                           f"+{statistics.median(extra):.0f} (median), up to +{max(extra)}")
         summary += [f"{key_name(k)}: {f}" for k, fs in self.flags.items() for f in fs]
         if previous.keys:
             changed = compare(previous, cal)
@@ -469,11 +423,9 @@ class MidiRig:
         if self.cancel.wait(max(0.0, seconds)):
             raise Cancelled()
 
-    def _collect(self, key, until: float, got: list, pedal: bool = False) -> None:
-        """Gather this key's (or these keys') sensor events until `until`; anything else means
-        someone's playing (but with `pedal`, sustain-pedal reports are ours: restrike holds it
-        down)."""
-        keys = {key} if isinstance(key, int) else set(key)
+    def _collect(self, key: int, until: float, got: list, pedal: bool = False) -> None:
+        """Gather this key's sensor events until `until`; anything else means someone's playing
+        (but with `pedal`, sustain-pedal reports are ours: restrike holds it down)."""
         while True:
             if self.cancel.is_set():
                 raise Cancelled()
@@ -486,9 +438,9 @@ class MidiRig:
                 continue
             if pedal and kind == "cc" and a == 64:
                 continue
-            if kind == "cc" or a not in keys:
+            if kind == "cc" or a != key:
                 raise Interrupted(f"{key_name(a)}" if kind != "cc" else "a pedal")
-            got.append((t, kind, a, b))
+            got.append((t, kind, b))
 
     def _settle(self) -> None:
         """Let the last note's damper fall and the room go quiet; drop any stragglers."""
@@ -505,20 +457,29 @@ class MidiRig:
             if kind == "on":
                 raise Interrupted(key_name(a))
 
-    def strike(self, key: int, vel: int, hold: float, listen: bool = True) -> Strike:
-        """One note held for `hold`; `listen` also measures its loudness on the mic."""
+    def strike(self, key: int, vel: int, hold: float, listen: bool = True,
+               pedal: bool = False) -> Strike:
+        """One note held for `hold`, with the sustain pedal down if `pedal`; `listen` also
+        measures its loudness on the mic."""
         self._settle()
         got: list = []
+        if pedal:
+            self.out.cc(64, 127)
+            self._collect(key, self.clock() + 0.1, got, pedal=True)
         t0 = self.clock()
         self.out.note_on(key, vel)
-        self._collect(key, t0 + hold, got)
+        self._collect(key, t0 + hold, got, pedal)
         self.out.note_off(key)
         t1 = self.last_off = self.clock()
-        self._collect(key, max(t1 + 0.35, t0 + 0.45), got)
-        ons = [(t, b) for t, kind, _, b in got if kind == "on"]
+        self._collect(key, max(t1 + 0.35, t0 + 0.45), got, pedal)
+        if pedal:
+            self.out.cc(64, 0)
+            self.last_off = self.clock()
+            self._collect(key, self.last_off + 0.15, got, pedal=True)
+        ons = [(t, b) for t, kind, b in got if kind == "on"]
         if not ons:
             return Strike()
-        offs = [t for t, kind, _, _ in got if kind == "off" and t >= ons[0][0]]
+        offs = [t for t, kind, _ in got if kind == "off" and t >= ons[0][0]]
         s = Strike(sensed=ons[0][1], l_on=ons[0][0] - t0,
                    l_off=(offs[0] - t1) if offs and offs[0] >= t1 else None)
         if self.mic and listen:
@@ -526,24 +487,6 @@ class MidiRig:
             peak = self.mic.peak(t0, t0 + 0.6)
             s.db = None if peak is None else round(peak - self.mic.noise, 1)
         return s
-
-    def chord(self, keys: list[int], vel: int, hold: float) -> dict[int, int | None]:
-        """These keys together, held for `hold`: what the sensors read for each (None: missed)."""
-        self._settle()
-        got: list = []
-        t0 = self.clock()
-        for k in keys:
-            self.out.note_on(k, vel)
-        self._collect(keys, t0 + hold, got)
-        for k in keys:
-            self.out.note_off(k)
-        self.last_off = self.clock()
-        self._collect(keys, max(self.last_off + 0.35, t0 + 0.45), got)
-        sensed: dict[int, int | None] = {k: None for k in keys}
-        for t, kind, a, b in got:
-            if kind == "on" and sensed[a] is None:
-                sensed[a] = b
-        return sensed
 
     def restrike(self, key: int, vel: int, hold: float, gap: float) -> bool:
         """With the sustain pedal down: a note, released, then the same key `gap` later.
@@ -566,7 +509,7 @@ class MidiRig:
         self.out.cc(64, 0)
         self.last_off = self.clock()
         self._collect(key, self.last_off + 0.15, got, pedal=True)
-        return sum(1 for _, kind, _, _ in got if kind == "on") >= 2
+        return sum(1 for _, kind, _ in got if kind == "on") >= 2
 
     def wait_idle(self, seconds: float) -> None:
         quiet_since = self.clock()

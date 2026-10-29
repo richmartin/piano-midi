@@ -3,12 +3,12 @@
 The playback model (docs/design.md): a piece's events say when each note should *sound* and how
 loud, in the piano's own key-sensor units. render() turns them into what to *send*, per key k:
 
-  velocity   ov = clamp(iv * sv(k) + mv(k))
+  velocity   ov = clamp(iv * sv(k) + mv(k)); with the sustain pedal down at the strike, a soft
+             note strikes weaker (C3 at 20-30: 15-20 dB quieter), so the key's pedal curve,
+             sv_p / mv_p, from its own floor v_min_p — whichever asks for more
   latency    the note-on goes l_on(ov, k) early, the note-off l_off(k) early, pedals l_cc early
   duration   the hold sent is at least md(ov, k), or the hammer is pulled back before it lands
   re-strike  a key needs mr(k) between its note-off and its next note-on to sound again
-  chords     a note sent with n others (within CHORD_WINDOW) strikes weaker: the solenoids share
-             one supply. It is asked for chord_loss(n, iv) louder, in sensor units, to make up
 
 The result is in send-time order, and starts up to LEAD before the piece does. The numbers come
 from calibration.json (written by a calibration run); without one, DEFAULTS — measured on this
@@ -40,7 +40,6 @@ DEFAULTS = {
 }
 L_CC = 0.048                   # pedals, not yet measured: assumed to move like the dampers
 MIN_VELOCITY = 12              # every key sounded at 12 when held long enough
-CHORD_WINDOW = 0.040           # notes sent this close together draw on the supply together
 
 
 class Sent(NamedTuple):
@@ -63,20 +62,22 @@ def _interp(points, x: float) -> float:
 
 
 class Calibration:
-    def __init__(self, keys: dict | None = None, l_cc: float = L_CC, info: dict | None = None,
-                 chord: dict | None = None):
+    def __init__(self, keys: dict | None = None, l_cc: float = L_CC, info: dict | None = None):
         self.keys = {int(k): {**DEFAULTS, **v} for k, v in (keys or {}).items()}
         self.l_cc = l_cc
-        # others sounding -> [(sensor velocity alone, sensor velocity lost)]; none: no correction
-        self.chord = {int(n): pts for n, pts in (chord or {}).items() if pts}
         self.info = info or {}             # when, which mic: whatever the run recorded
 
     def _p(self, key: int) -> dict:
         return self.keys.get(key, DEFAULTS)
 
-    def velocity(self, key: int, iv: float) -> int:
+    def velocity(self, key: int, iv: float, pedal: bool = False) -> int:
         p = self._p(key)
-        return max(MIN_VELOCITY, min(127, round(iv * p["sv"] + p["mv"])))
+        v = iv * p["sv"] + p["mv"]
+        floor = MIN_VELOCITY
+        if pedal and "sv_p" in p:
+            v = max(v, iv * p["sv_p"] + p["mv_p"])
+            floor = p.get("v_min_p", MIN_VELOCITY)
+        return max(floor, min(127, round(v)))
 
     def l_on(self, key: int, ov: int) -> float:
         return min(LEAD, _interp(self._p(key)["l_on"], ov))
@@ -90,15 +91,6 @@ class Calibration:
     def mr(self, key: int) -> float:
         return self._p(key)["mr"]
 
-    def chord_loss(self, others: int, iv: float) -> float:
-        """How much quieter (sensor units) a note wanted at iv strikes alongside `others`."""
-        if others <= 0 or not self.chord:
-            return 0.0
-        n = min(others, max(self.chord))
-        while n not in self.chord:
-            n -= 1
-        return max(0.0, _interp(self.chord[n], iv)) if n > 0 else 0.0
-
     # --- the model ------------------------------------------------------------------------
     def render(self, events: list[Event], loudness: Callable[[int], float]) -> list[Sent]:
         """Sound-time events -> send-time events. `loudness` maps a file velocity to the
@@ -106,20 +98,19 @@ class Calibration:
         end = events[-1].time if events else 0.0
         notes: list[list] = []                       # [key, t_on, t_off, ov]
         open_: dict[int, list] = {}
-        wanted: list[float] = []                     # each note's iv
+        pedal = False                                # the sustain pedal, in sound time
         for e in events:
-            if e.kind == "on":
+            if e.kind == "cc" and e.a == 64:
+                pedal = e.b >= 64
+            elif e.kind == "on":
                 if e.a in open_:                     # re-struck without a note-off: end it here
                     open_.pop(e.a)[2] = e.time
                 iv = loudness(e.b)
-                note = [e.a, e.time, end, self.velocity(e.a, iv) if iv > 0 else 0]
+                note = [e.a, e.time, end, self.velocity(e.a, iv, pedal) if iv > 0 else 0]
                 notes.append(note)
-                wanted.append(iv)
                 open_[e.a] = note
             elif e.kind == "off" and e.a in open_:
                 open_.pop(e.a)[2] = e.time
-        if self.chord:
-            self._chords(notes, wanted)
 
         out: list[Sent] = [Sent("cc", e.time - self.l_cc, e.a, e.b, e.time)
                            for e in events if e.kind == "cc"]
@@ -143,25 +134,9 @@ class Calibration:
         out.sort(key=lambda s: (s.time, s.kind == "on"))
         return out
 
-    def _chords(self, notes: list[list], wanted: list[float]) -> None:
-        """Make up what each note loses to the others sent with it. Grouped by send time as
-        first planned; the louder velocity then goes a little earlier, which is near enough."""
-        sends = sorted((t_on - self.l_on(key, ov), i)
-                       for i, (key, t_on, _, ov) in enumerate(notes) if ov)
-        lo = hi = 0
-        for s, i in sends:
-            while sends[lo][0] < s - CHORD_WINDOW:
-                lo += 1
-            while hi < len(sends) and sends[hi][0] <= s + CHORD_WINDOW:
-                hi += 1
-            loss = self.chord_loss(hi - lo - 1, wanted[i])
-            if loss:
-                notes[i][3] = self.velocity(notes[i][0], wanted[i] + loss)
-
     # --- the file -------------------------------------------------------------------------
     def to_json(self) -> dict:
         return {"version": 1, "info": self.info, "l_cc": self.l_cc,
-                "chord": {str(n): pts for n, pts in sorted(self.chord.items())},
                 "keys": {str(k): v for k, v in sorted(self.keys.items())}}
 
 
@@ -172,8 +147,7 @@ def load(path: str) -> Calibration:
             d = json.load(f)
         if d.get("version") != 1:
             raise ValueError(f"unknown version {d.get('version')!r}")
-        cal = Calibration(d.get("keys", {}), d.get("l_cc", L_CC), d.get("info", {}),
-                          d.get("chord"))
+        cal = Calibration(d.get("keys", {}), d.get("l_cc", L_CC), d.get("info", {}))
         LOG.info("calibration: %s (%d keys)", path, len(cal.keys))
         return cal
     except FileNotFoundError:
