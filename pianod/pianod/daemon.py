@@ -22,7 +22,7 @@ import socket
 import threading
 import time
 
-from . import calibration, library, looper, midiio, player, smf, store
+from . import calibrate, calibration, library, looper, midiio, player, smf, store
 
 LOG = logging.getLogger("pianod")
 
@@ -71,6 +71,8 @@ class Pianod:
         self.index = -1
         self.listeners: list = []
         self.last_input = 0.0                # monotonic: someone played the keys
+        self.calib: calibrate.Calibrator | None = None
+        self.calib_summary: list[str] = []   # the last calibration's findings
         st = store.read_json(f"{DATA}/state.json", {})
         if 1 <= st.get("volume", 0) <= 11:
             self.player.volume = st["volume"]
@@ -98,6 +100,8 @@ class Pianod:
                 "midi_in": self.midi_in is not None,
                 "works": len(self.lib.all_works()),
                 "perf": self.looper.status(),
+                "calib": self.calib.status() if self.calib else None,
+                "calib_summary": self.calib_summary,
             }
 
     def _push(self):
@@ -154,8 +158,15 @@ class Pianod:
             self._push()
         return {"ok": True, **(reply or {})}
 
+    def _calibrating(self) -> bool:
+        return self.calib is not None and not self.calib.finished
+
     def _handle(self, cmd, req):
         with self.lock:
+            if self._calibrating() and cmd not in (
+                    "status", "composers", "works", "recordings", "queue", "calibrate_cancel",
+                    "panic"):
+                raise ValueError("calibrating (cancel it first)")
             if cmd == "status":
                 return {"state": self.state()}
             if cmd == "composers":
@@ -222,8 +233,26 @@ class Pianod:
                 self._save_state()
                 return {}
             if cmd == "panic":
+                if self._calibrating():
+                    self.calib.rig.cancel.set()
                 self.player.pause()
                 self.out.panic()
+                return {}
+
+            if cmd == "calibrate":
+                # Optional delay in minutes, to get out of the house first.
+                delay = max(0.0, float(req.get("delay", 0))) * 60
+                self.player.stop()
+                self.looper.clear()
+                rig = calibrate.MidiRig(self.out, calibrate.Mic.find())
+                self.calib = calibrate.Calibrator(rig, delay=delay)
+                self.calib_summary = []
+                threading.Thread(target=self._run_calibration, daemon=True, name="calibrate").start()
+                return {}
+            if cmd == "calibrate_cancel":
+                if not self._calibrating():
+                    raise ValueError("not calibrating")
+                self.calib.rig.cancel.set()
                 return {}
 
             if cmd == "mode":
@@ -267,6 +296,25 @@ class Pianod:
             return self.lib.sync(SERVER_URL)
         raise ValueError(f"unknown command {cmd!r}")
 
+    def _run_calibration(self):
+        c = self.calib
+        c.run()
+        self.out.panic()
+        c.rig.close()
+        with self.lock:
+            if c.phase == "done":
+                try:
+                    self.calib_summary = c.save(DATA, self.cal)
+                except OSError as e:
+                    c.phase, c.message = "failed", f"couldn't save: {e}"
+                else:
+                    self.cal = calibration.load(f"{DATA}/calibration.json")
+                    self.player.cal = self.looper.cal = self.cal
+            LOG.info("calibration %s %s", c.phase, c.message)
+            for line in self.calib_summary:
+                LOG.info("calibration: %s", line)
+        self._push()
+
     def _require_library_mode(self):
         if self.mode != "library":
             raise ValueError("in performance mode (switch back to the library first)")
@@ -293,6 +341,10 @@ class Pianod:
             elif msg.type == "control_change" and msg.control in smf.PEDALS:
                 kind, a, b = "cc", msg.control, msg.value
             if kind is None:
+                continue
+            calib = self.calib
+            if calib is not None and not calib.finished:
+                calib.rig.feed(kind, a, b)           # raw: the calibration wants the echoes
                 continue
             if kind in ("on", "off") and self.gate.is_echo(kind, a):
                 continue

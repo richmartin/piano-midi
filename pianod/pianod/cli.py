@@ -12,6 +12,8 @@
   piano recordings
   piano sync                    refresh the library mirror from the server
   piano panic                   silence, now
+  piano calibrate [MINUTES]     measure every key (up to an hour), optionally starting later
+  piano calibrate cancel
 """
 
 from __future__ import annotations
@@ -32,6 +34,22 @@ def request(req: dict) -> dict:
 
 
 def show(st: dict) -> None:
+    c = st.get("calib")
+    if c:
+        line = f"Calibration: {c['phase']}"
+        if c["phase"] == "waiting":
+            line += f", starts in {c['starts_in'] // 60}:{c['starts_in'] % 60:02d}"
+        if c["phase"] in ("measuring", "paused"):
+            line += f", {c['key']} ({c['done']}/{c['of']} keys)"
+            if c.get("eta") is not None:
+                line += f", ~{c['eta'] // 60} min left"
+        if c["message"]:
+            line += f": {c['message']}"
+        if c["flags"]:
+            line += f", {c['flags']} flagged"
+        print(line)
+        for s in st.get("calib_summary") or []:
+            print(f"  {s}")
     if st["mode"] == "performance":
         p = st["perf"]
         line = f"Performance: {p['state']}"
@@ -90,6 +108,8 @@ def main(argv=None) -> int:
             "recordings": lambda: {"cmd": "recordings"},
             "sync": lambda: {"cmd": "sync"},
             "panic": lambda: {"cmd": "panic"},
+            "calibrate": lambda: ({"cmd": "calibrate_cancel"} if a and a[0] == "cancel"
+                                  else {"cmd": "calibrate", "delay": float(a[0]) if a else 0}),
         }
         if cmd not in reqs:
             print(__doc__.strip())
