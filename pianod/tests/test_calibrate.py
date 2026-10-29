@@ -1,8 +1,9 @@
 import json
 
 from pianod import calibration
-from pianod.calibrate import (MARGIN, MR_MARGIN, Calibrator, Cancelled, Interrupted, PreflightFailed,
-                              Strike, bisect, compare, key_params, loudness_suspects)
+from pianod.calibrate import (MARGIN, MR_MARGIN, SENSOR_FLOOR, Calibrator, Cancelled, Interrupted,
+                              PreflightFailed, Strike, bisect, chord_losses, compare, key_params,
+                              loudness_suspects)
 from pianod.calibration import Calibration
 
 
@@ -47,12 +48,23 @@ class FakePiano:
     def restrike(self, k, v, hold, gap):
         return gap >= 0.06
 
+    def chord_loss(self, others, v):
+        # Each other solenoid costs a soft note more than a loud one; nothing at 70 and above.
+        return others * 5 * max(0, 70 - v) / 50
+
+    def chord(self, keys, v, hold):
+        out = {}
+        for k in keys:
+            s = self.sensor(k, v) - self.chord_loss(len(keys) - 1, v)
+            out[k] = round(s) if s >= 33 else None
+        return out
+
     def wait_idle(self, seconds):
         self.waited_idle += 1
 
 
-def run(piano, keys=(47, 48, 49, 50, 51), **kw):
-    c = Calibrator(piano, keys=keys, **kw)
+def run(piano, keys=(47, 48, 49, 50, 51), chord_keys=(60, 72), **kw):
+    c = Calibrator(piano, keys=keys, chord_keys=chord_keys, **kw)
     c.run()
     return c
 
@@ -119,7 +131,7 @@ def test_preflight_runs_before_the_countdown_and_again_after():
             t[0] += 90
             seen.append(("later", c.status()["starts_in"]))
 
-    c = Calibrator(Piano(), keys=(60,), delay=600, clock=lambda: t[0])
+    c = Calibrator(Piano(), keys=(60,), delay=600, clock=lambda: t[0], chord_keys=())
     assert c.status()["phase"] == "preflight"
     c.run()
     assert seen == [("preflight", "preflight"), ("countdown", 600), ("later", 510),
@@ -198,3 +210,46 @@ def test_a_restrike_gap_that_only_sometimes_works_is_not_taken():
 
     c = run(Flaky(), keys=(60,))
     assert c.params[60]["mr"] - MR_MARGIN >= 0.06
+
+
+def test_the_chord_stage_measures_what_company_costs():
+    c = run(FakePiano())
+    piano = FakePiano()
+    cal = c.calibration()
+    for n, v in ((1, 30), (2, 30), (1, 45), (2, 45), (3, 45)):    # all sound in company
+        alone = piano.sensor(60, v)
+        assert abs(cal.chord_loss(n, alone) - piano.chord_loss(n, v)) < 1.5
+    assert cal.chord_loss(2, piano.sensor(60, 60)) < cal.chord_loss(2, piano.sensor(60, 20))
+    assert cal.chord_loss(0, 40) == 0
+
+
+def test_a_note_that_misses_in_company_counts_as_falling_to_the_floor():
+    raw = {60: {20: [{"alone": 36, "with": [30, None, None]}]}}
+    chord = chord_losses(raw)
+    assert chord[1] == [[36, 6.0]]
+    assert chord[2] == [[36, 36 - SENSOR_FLOOR]]
+
+
+def test_someone_playing_during_the_chords_pauses_them():
+    class Piano(FakePiano):
+        chords = 0
+
+        def chord(self, keys, v, hold):
+            self.chords += 1
+            if self.chords == 5:
+                raise Interrupted("D2")
+            return super().chord(keys, v, hold)
+
+    piano = Piano()
+    c = run(piano, keys=(50,), chord_keys=(60,))
+    assert c.phase == "done" and piano.waited_idle == 1 and 1 in c.chord
+
+
+def test_the_chords_are_saved_and_summarised(tmp_path):
+    c = run(FakePiano())
+    summary = c.save(str(tmp_path), Calibration())
+    assert any(s.startswith("chords: with 2 others") for s in summary)
+    back = calibration.load(str(tmp_path / "calibration.json"))
+    assert back.chord == c.chord
+    raw = json.loads(next(tmp_path.glob("calibration-raw-*.json")).read_text())
+    assert set(raw["chords"]) == {"60", "72"}

@@ -97,6 +97,41 @@ class TestRender:
         assert sent_for(r, 60, "on")[0].time >= 1.0 - LEAD - 1e-9
 
 
+class TestChords:
+    CHORD = {"1": [[35, 8], [60, 2]], "2": [[35, 14], [60, 4]]}
+
+    def test_no_table_no_correction(self):
+        cal = Calibration()
+        r = cal.render(notes((60, 1, 2, 40), (64, 1, 2, 40)), AS_IS)
+        assert {s.b for s in r if s.kind == "on"} == {cal.velocity(60, 40)}
+
+    def test_a_soft_chord_is_sent_louder_than_the_same_notes_alone(self):
+        cal = Calibration(chord=self.CHORD)
+        alone = cal.render(notes((60, 1, 2, 35), (64, 3, 4, 35)), AS_IS)
+        pair = cal.render(notes((60, 1, 2, 35), (64, 1, 2, 35)), AS_IS)
+        triad = cal.render(notes((60, 1, 2, 35), (64, 1, 2, 35), (67, 1, 2, 35)), AS_IS)
+        on = lambda r, k: sent_for(r, k, "on")[0].b                  # noqa: E731
+        assert on(alone, 60) == cal.velocity(60, 35)
+        assert on(pair, 60) == cal.velocity(60, 35 + 8)
+        assert on(triad, 60) == cal.velocity(60, 35 + 14)
+
+    def test_more_others_than_measured_use_the_most_measured(self):
+        cal = Calibration(chord=self.CHORD)
+        assert cal.chord_loss(5, 35) == 14
+        assert cal.chord_loss(1, 47.5) == 5                  # between the points
+
+    def test_the_window_is_in_send_time(self):
+        # A soft note and a loud one meant to sound together go out ~65 ms apart: no company.
+        cal = Calibration(chord=self.CHORD)
+        r = cal.render(notes((60, 1, 2, 35), (64, 1, 2, 100)), AS_IS)
+        assert sent_for(r, 60, "on")[0].b == cal.velocity(60, 35)
+
+    def test_saved_and_loaded(self, tmp_path):
+        path = tmp_path / "c.json"
+        path.write_text(json.dumps(Calibration(chord=self.CHORD).to_json()))
+        assert calibration.load(str(path)).chord_loss(2, 35) == 14
+
+
 class TestFileLoudness:
     def test_a_quiet_file_is_lifted_off_the_floor(self):
         ev = notes(*[(60, i, i + 0.5, 30 + i % 15) for i in range(40)])

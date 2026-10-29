@@ -145,6 +145,9 @@ Every note goes through two independent stages before it reaches the piano:
      notes; then enforce `max(md(ov, k), …)` on it.
    - **Re-strike**: a key needs `mr(k)` after its note-off before it can sound again; if the next
      note-on comes sooner, shorten the previous note rather than lose the new one.
+   - **Chords**: the solenoids share one supply, so a note sent with others (within 40 ms of
+     send time) strikes weaker. It is asked for `iv + chord_loss(n, iv)` instead, where `n` is
+     how many others go with it. One table for the whole piano, measured by the calibration.
 
 Because events now leave early by different amounts, the player looks ahead by the largest
 latency (~200 ms) and sends in *send-time* order, not sound-time order. The calibration is one
@@ -186,6 +189,15 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   lost 19 of 74 pedalled F4 re-strikes at exactly that gap. On F4 a 30 ms re-strike sounds 4/4
   without the pedal and 0/4 with it; 40 ms sounds 4/4 either way. Now F4 measures 77 ms
   (30 ms margin). That costs time: ~33 s a key, ~48 minutes for all 88.
+- **Chords, after the 88 keys**: on 8 keys from C2 to G5, at sent velocities 20 / 30 / 45 / 60,
+  the note alone and then with 1, 2 and 3 others (a fifth, a third, an octave) at the same
+  velocity, twice each — ~6 minutes. The loss is the mean drop in the sensor reading against
+  alone, a miss counting as a fall to the floor, so the correction covers misses too. Found
+  because, after the second full calibration, the Gnossienne still lost 23 of 980 notes, all
+  soft accompaniment in chords: soft notes alone read 5 under what was wanted and never missed;
+  with 1 other, 12 under and 3% missed; with 2 or more, 17 under and 4% missed. Loud notes never
+  missed. (The uncalibrated defaults lost only 2: they sent soft notes louder than needed, which
+  happened to cover the loss.)
 - **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
   summary on the badge — including keys that changed noticeably since last time, which is how a
   failing solenoid or sensor gets noticed.
