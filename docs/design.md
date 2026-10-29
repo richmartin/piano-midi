@@ -88,7 +88,19 @@ Run a laptop with a 20-line mido probe against the real piano:
    **62–70 ms** for note-ons, 45–51 ms for note-offs (DELAY IN: 513–520 ms). `PIANO_LATENCY_MS=65`,
    which the looper uses to play layers early so they land with live playing. Trust ears over
    this if layers drift.
-3. **Dynamics floor** — the minimum solenoid velocity. May want a velocity map later.
+3. **Dynamics floor** — the minimum solenoid velocity. Middle C, realtime, sent velocity → what
+   the key sensors reported → peak loudness on the laptop mic:
+
+   | sent | 100 | 80 | 60 | 45 | 35 | 30 | 25 | 20 | 15 | ≤12 |
+   |---|---|---|---|---|---|---|---|---|---|---|
+   | sensor | 91 | 78 | 64 | 53 | 46 | 43 | 40 | 36 | 33 | 33 |
+   | dBFS | −14.9 | −18.6 | −22.3 | −25.8 | −28.6 | −30.1 | −31.7 | −33.7 | −35.3 | −35.5 |
+
+   **Floor: sent 15** (sensor 33); everything below plays the same. The range is compressed —
+   sent 15–100 lands as 33–91 — so replaying a take with its recorded velocities comes out
+   louder in quiet passages, every pass. Wants an inverse map (send the velocity whose sensor
+   reading matches the one recorded) before the looper's overdubs will sound faithful.
+   Your own playing (keys test): 30–86, sustain pedal reported on MIDI OUT.
 4. **Boot time** — power-on to ready, for the smart-plug warm-up delay (server side, later).
 
 ## Later (server side, not in this repo yet)
