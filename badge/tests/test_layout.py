@@ -61,16 +61,19 @@ class TestListsAndSections:
         assert layout.list_window(sel=2, top=5, rows=7) == 2
         assert layout.list_window(sel=5, top=3, rows=7) == 3
 
+    @staticmethod
+    def row(name, era, works):
+        return [name.lower(), name, "", None, None, era, works]     # daemon.COMPOSER_ROW
+
     def test_eras_in_order_most_works_first(self):
-        cs = [{"name": "Field", "era": "classical", "works": 1}, {"name": "Chopin", "era": "romantic", "works": 69},
-              {"name": "Mozart", "era": "classical", "works": 25}, {"name": "Bach", "era": "baroque", "works": 9},
-              {"name": "Beethoven", "era": "classical", "works": 38}, {"name": "?", "era": None, "works": 3}]
-        assert [c["name"] for c in layout.by_era(cs)] == ["Bach", "Beethoven", "Mozart", "Field", "Chopin", "?"]
+        cs = [self.row(*c) for c in (("Field", "classical", 1), ("Chopin", "romantic", 69), ("Mozart", "classical", 25),
+                                    ("Bach", "baroque", 9), ("Beethoven", "classical", 38), ("?", None, 3))]
+        assert [c[layout.C_SHORT] for c in layout.by_era(cs)] == ["Bach", "Beethoven", "Mozart", "Field", "Chopin", "?"]
 
     def test_jumping_sections_wraps(self):
-        cs = layout.by_era([{"name": n, "era": e, "works": 1} for n, e in
+        cs = layout.by_era([self.row(n, e, 1) for n, e in
                             (("Bach", "baroque"), ("Mozart", "classical"), ("Haydn", "classical"), ("Liszt", "romantic"))])
-        secs = layout.sections(cs, lambda c: c["era"])
+        secs = layout.sections(cs, lambda c: c[layout.C_ERA])
         assert [s for s, _ in secs] == ["baroque", "classical", "romantic"]
         assert layout.jump(0, secs, 1) == 1          # Bach -> the first classical
         assert layout.jump(2, secs, 1) == 3          # Haydn -> Liszt

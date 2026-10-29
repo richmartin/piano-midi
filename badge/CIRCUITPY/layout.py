@@ -67,11 +67,17 @@ def jump(sel, secs, step):
 ERAS = ("baroque", "classical", "romantic", "modern", None)
 
 
+# pianod's compact rows (daemon.COMPOSER_ROW, PIANIST_ROW, WORK_ROW)
+C_SLUG, C_SHORT, C_FIRST, C_BORN, C_DIED, C_ERA, C_WORKS = range(7)
+P_SLUG, P_NAME, P_SHORT, P_BORN, P_DIED, P_WORKS = range(6)
+W_ID, W_TITLE, W_MOVEMENT, W_PERFORMER, W_DURATION, W_COMPOSER = range(6)
+
+
 def by_era(composers):
-    """Composers grouped by era in history's order, most works first within an era."""
+    """Composer rows grouped by era in history's order, most works first within an era."""
     def rank(c):
-        e = c.get("era")
-        return (ERAS.index(e) if e in ERAS else len(ERAS), -c.get("works", 0), c.get("sort") or c["name"])
+        e = c[C_ERA]
+        return (ERAS.index(e) if e in ERAS else len(ERAS), -(c[C_WORKS] or 0), c[C_SHORT] or "")
     return sorted(composers, key=rank)
 
 

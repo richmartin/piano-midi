@@ -33,6 +33,19 @@ SERVER_URL = os.environ.get("PIANO_SERVER", "https://home.fam-mart.in")
 PAGE_BYTES = 3000              # the badge drops any line over 4 KB: lists go in pages under it
 
 
+# The panel asks for lists with "compact": rows of values in these orders instead of dicts,
+# about a third of the bytes, and far fewer objects in its 192 KB of RAM.
+COMPOSER_ROW = ("slug", "short", "first", "born", "died", "era", "works")
+PIANIST_ROW = ("slug", "name", "short", "born", "died", "works")
+WORK_ROW = ("id", "title", "movement", "performer", "duration", "composer")
+
+
+def compact(req: dict, items: list[dict], fields: tuple) -> list:
+    if not req.get("compact"):
+        return items
+    return [[it.get(f) for f in fields] for it in items]
+
+
 def brief(w: dict, composer: bool = False) -> dict:
     """A work as a list shows it: its pianist (short) if it's a roll, else its length."""
     out = {"id": w["id"], "title": w["title"], "movement": w.get("movement"),
@@ -212,19 +225,22 @@ class Pianod:
             if cmd == "status":
                 return {"state": self.state()}
             if cmd == "composers":
-                return page(req, "composers", self.lib.composer_list())
+                return page(req, "composers", compact(req, self.lib.composer_list(), COMPOSER_ROW))
             if cmd == "works":
-                return page(req, "works", [brief(w) for w in self.lib.works_of(req["slug"])])
+                return page(req, "works", compact(req, [brief(w) for w in self.lib.works_of(req["slug"])], WORK_ROW))
             if cmd == "recordings":
-                return page(req, "works", [brief(w) for w in self.lib.recordings()])
+                return page(req, "works", compact(req, [brief(w) for w in self.lib.recordings()], WORK_ROW))
             if cmd == "pianists":
-                return page(req, "pianists", self.lib.pianist_list())
+                return page(req, "pianists", compact(req, self.lib.pianist_list(), PIANIST_ROW))
             if cmd == "pianist_works":
-                return page(req, "works", [brief(w, composer=True) for w in self.lib.pianist_works(req["slug"])])
+                return page(req, "works", compact(req, [brief(w, composer=True)
+                                                        for w in self.lib.pianist_works(req["slug"])], WORK_ROW))
             if cmd == "collection":
-                return page(req, "works", [brief(w, composer=True) for w in self.lib.collection(req["slug"])])
+                return page(req, "works", compact(req, [brief(w, composer=True)
+                                                        for w in self.lib.collection(req["slug"])], WORK_ROW))
             if cmd == "favourites":
-                return page(req, "works", [brief(w, composer=True) for w in self._favourite_works()])
+                return page(req, "works", compact(req, [brief(w, composer=True)
+                                                        for w in self._favourite_works()], WORK_ROW))
             if cmd == "shelves":
                 return {"composers": sum(1 for c in self.lib.composers if c.get("slug") != "unknown"),
                         "pianists": len(self.lib.pianists), "favourites": len(self._favourite_works()),
