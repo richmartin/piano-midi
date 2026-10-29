@@ -71,6 +71,8 @@ Wagon settings pianod needs (both on the wagon's front panel):
 - **MIDIOUT=KBD OUT**, toggled by the **R** (part cancel) button while in MIDI mode. The other
   setting, DELAY OUT, sends MIDI IN back out after the wagon's playback delay — it looks like an
   echo but carries none of the keys, so recording silently captures nothing.
+- **MIDIIN=REALTIME**. The other setting, DELAY IN, holds incoming MIDI ~515 ms before playing it
+  (it's what DELAY OUT keeps external synths in step with); realtime plays in ~66 ms.
 
 The REC button is for floppies and does nothing in MIDI mode. The wagon-to-piano cable has worked
 loose once: if MIDI is lit and the piano stays silent, reseat it.
@@ -80,11 +82,12 @@ loose once: if MIDI is lit and the piano stays silent, reseat it.
 Run a laptop with a 20-line mido probe against the real piano:
 
 1. **Echo** — does solenoid playback appear on MIDI OUT? **Yes** (2026-10-29, KBD OUT): every
-   note and its note-off, velocity as the sensors measured it (sent 70, reported 72–74).
-   `PIANO_ECHO_MS=700`.
-2. **Latency** — MIDI-in-to-hammer delay; send a note, time its echo. **513–520 ms**, steady: the
-   wagon delays playback by about half a second. `PIANO_LATENCY_MS=515`, which the looper uses
-   to play layers early so they land with live playing. Trust ears over this if layers drift.
+   note and its note-off, velocity as the sensors measured it (sent 70, reported 72–75).
+   `PIANO_ECHO_MS=250`.
+2. **Latency** — MIDI-in-to-hammer delay; send a note, time its echo. With MIDIIN=REALTIME
+   **62–70 ms** for note-ons, 45–51 ms for note-offs (DELAY IN: 513–520 ms). `PIANO_LATENCY_MS=65`,
+   which the looper uses to play layers early so they land with live playing. Trust ears over
+   this if layers drift.
 3. **Dynamics floor** — the minimum solenoid velocity. May want a velocity map later.
 4. **Boot time** — power-on to ready, for the smart-plug warm-up delay (server side, later).
 
