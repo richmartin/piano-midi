@@ -198,6 +198,9 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   only weakly at 30; the mic hears it 15–20 dB quieter (at 45 only ~3 dB); C4 at 20 is ~10 dB
   quieter. Other keys held down cost 2–3 sensor units. Why the pedal weakens the hammers isn't
   known: perhaps the pedal solenoid, held on, loads the supply they share.
+  With the pedal curve the Gnossienne lost 4 of 980 (0.4%; was 23), all soft notes under the
+  pedal on C3 / G#3 / C4; timing 10-90% within -13 to +38 ms. Soft notes under the pedal need
+  +9 velocity (median over the keys), up to +24.
 - **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
   summary on the badge — including keys that changed noticeably since last time, which is how a
   failing solenoid or sensor gets noticed.
