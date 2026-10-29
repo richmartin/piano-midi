@@ -13,40 +13,11 @@ import time
 
 LOG = logging.getLogger("pianod")
 
-# The DKW10's solenoids, measured on middle C (docs/design.md): velocity sent -> velocity its key
-# sensors report. Below 15 everything plays as 33; the range is compressed, soft notes louder.
-DKW10_CURVE = ((15, 33), (20, 36), (25, 40), (30, 43), (35, 46), (45, 53), (60, 64), (80, 78),
-               (100, 91))
-
-
-class VelocityMap:
-    """Velocity wanted (as the sensors would report it) -> velocity to send.
-
-    Inverts a measured send->sensor curve, so a take recorded from the keys plays back at the
-    loudness it was played instead of creeping louder with every replay. Below the curve's floor
-    it sends the floor (the quietest the piano can do); above its top it extends the last segment.
-    """
-
-    def __init__(self, curve=DKW10_CURVE):
-        self.curve = sorted(curve)
-
-    def __call__(self, velocity: int) -> int:
-        pts = self.curve
-        if velocity <= pts[0][1]:
-            return pts[0][0]
-        for (s0, h0), (s1, h1) in zip(pts, pts[1:]):
-            if velocity <= h1:
-                return round(s0 + (velocity - h0) * (s1 - s0) / (h1 - h0))
-        (s0, h0), (s1, h1) = pts[-2], pts[-1]
-        return min(127, round(s1 + (velocity - h1) * (s1 - s0) / (h1 - h0)))
-
-
 class MidiOut:
     """Notes and pedals out to the piano. Thread-safe; tracks what is sounding for panic()."""
 
-    def __init__(self, port=None, velocity_map=None):
+    def __init__(self, port=None):
         self.port = port                   # a mido output port, or None (not connected)
-        self.velocity_map = velocity_map   # a VelocityMap, or None to send velocities as given
         self.lock = threading.Lock()
         self.active: set[int] = set()      # notes currently on
         self.dirty = False                 # anything sent since the last panic (a pedal may be down)
@@ -69,8 +40,6 @@ class MidiOut:
         import mido
         self.active.add(note)
         self.dirty = True
-        if self.velocity_map:
-            velocity = self.velocity_map(velocity)
         self._send(mido.Message("note_on", note=note, velocity=max(0, min(127, velocity))))
 
     def note_off(self, note: int) -> None:
@@ -178,7 +147,7 @@ class EchoGate:
             return False
 
 
-def open_ports(match_out: str = "", match_in: str = "", velocity_map=None):
+def open_ports(match_out: str = "", match_in: str = ""):
     """Open the piano's MIDI out and in ports: (MidiOut, input port or None).
 
     A port matches if the pattern appears in its name (case-insensitive); an empty pattern takes
@@ -191,7 +160,7 @@ def open_ports(match_out: str = "", match_in: str = "", velocity_map=None):
         out_names, in_names = mido.get_output_names(), mido.get_input_names()
     except Exception as e:                       # no rtmidi backend (a laptop without the package)
         LOG.warning("no MIDI backend (%s); running without MIDI", e)
-        return MidiOut(None, velocity_map), None
+        return MidiOut(None), None
 
     def pick(names, pattern):
         for name in names:
@@ -216,4 +185,4 @@ def open_ports(match_out: str = "", match_in: str = "", velocity_map=None):
             LOG.info("MIDI in: %s", in_name)
         except (OSError, RuntimeError) as e:
             LOG.warning("can't open MIDI in %s: %s", in_name, e)
-    return MidiOut(out_port, velocity_map), in_port
+    return MidiOut(out_port), in_port

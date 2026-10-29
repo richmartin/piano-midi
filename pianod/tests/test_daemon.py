@@ -70,7 +70,8 @@ def test_play_composer_runs_the_queue_to_the_end(d):
     ok(d, "play", slug="bach-js")
     assert wait_for(lambda: not d.player.playing and d.index == 1)
     ons = [s for s in d.out.sent if s[0] == "on"]
-    assert ons == [("on", 60, 70), ("on", 62, 70)]       # the default volume 8 scales 100 to 70
+    # A flat file fits to the middle of the piano (sensor 62), sent as 57 by the default curve.
+    assert ons == [("on", 60, 57), ("on", 62, 57)]
     st = d.state()
     assert st["title"] == "Fugue"
 
@@ -133,7 +134,8 @@ def test_perf_record_take_save(d, tmp_path):
     ok(d, "mode", mode="library")
     ok(d, "play", ids=[recs[0]["id"]])
     assert wait_for(lambda: not d.player.playing)
-    assert ("on", 60, 63) in d.out.sent        # 90 scaled by the default volume 8
+    # A take isn't fitted: sensor 90 as played, sent as 99 by the default curve, at volume 8.
+    assert ("on", 60, 99) in d.out.sent
 
 
 def test_perf_save_with_nothing_recorded(d):

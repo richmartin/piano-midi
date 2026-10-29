@@ -22,7 +22,7 @@ import socket
 import threading
 import time
 
-from . import library, looper, midiio, player, smf, store
+from . import calibration, library, looper, midiio, player, smf, store
 
 LOG = logging.getLogger("pianod")
 
@@ -32,9 +32,7 @@ SERIAL_GLOB = os.environ.get("PIANO_SERIAL", "/dev/serial/by-id/*Adafruit*-if02"
 SERVER_URL = os.environ.get("PIANO_SERVER", "https://home.fam-mart.in")
 MIDI_OUT = os.environ.get("PIANO_MIDI_OUT", "")      # substring of the port name; "" = first
 MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
-LATENCY = float(os.environ.get("PIANO_LATENCY_MS", "0")) / 1000     # solenoid delay, measured
 ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
-VELOCITY_MAP = os.environ.get("PIANO_VELOCITY_MAP", "1") != "0"     # invert the measured curve
 POLL = 0.005                  # looper tick
 PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
 MODES = ("library", "performance")
@@ -60,14 +58,14 @@ class Pianod:
         os.makedirs(DATA, exist_ok=True)
         self.lib = library.Library(DATA)
         if out is None:
-            vmap = midiio.VelocityMap() if VELOCITY_MAP else None
-            out, midi_in = midiio.open_ports(MIDI_OUT, MIDI_IN, vmap)
+            out, midi_in = midiio.open_ports(MIDI_OUT, MIDI_IN)
         self.out = out
         self.midi_in = midi_in
         self.gate = midiio.EchoGate(window=ECHO_MS / 1000)
-        self.player = player.Player(self.out, on_event=self.gate.sent)
+        self.cal = calibration.load(f"{DATA}/calibration.json")
+        self.player = player.Player(self.out, on_event=self.gate.sent, calibration=self.cal)
         self.player.on_ended = self._track_ended
-        self.looper = looper.Looper(self.out, latency=LATENCY, on_event=self.gate.sent)
+        self.looper = looper.Looper(self.out, on_event=self.gate.sent, calibration=self.cal)
         self.mode = "library"
         self.queue: list[dict] = []          # [{id, title, composer}]
         self.index = -1
@@ -113,8 +111,11 @@ class Pianod:
     # --- the queue -------------------------------------------------------------------------
     def _load_current(self) -> None:
         cur = self.queue[self.index]
-        events, duration = smf.load(self.lib.path(self.lib.work(cur["id"])))
-        self.player.load(events, duration, cur["title"])
+        work = self.lib.work(cur["id"])
+        events, duration = smf.load(self.lib.path(work))
+        # Our own takes are already in the piano's sensor units: no fitting.
+        self.player.load(events, duration, cur["title"],
+                         fit=not work["url"].startswith("/recordings/"))
 
     def _play_queue(self, works: list[dict], shuffle: bool = False) -> None:
         if not works:

@@ -137,16 +137,26 @@ class TestUndoRedo:
             lp.undo()
 
 
-class TestLatency:
-    def test_playback_runs_early_by_the_latency(self):
+class TestOverdubCommit:
+    def test_ending_an_overdub_mid_pass_neither_repeats_nor_skips(self):
         out = CollectOut()
-        lp = Looper(out, clock=lambda: 0.0, latency=0.1)
+        lp = Looper(out, clock=lambda: 0.0)
         lp.record(now=10.0)
-        lp.note_in("on", 60, 90, now=10.5)
-        lp.note_in("off", 60, now=11.0)
-        lp.close_loop(now=12.0)
-        lp.poll(now=12.41)                       # 0.41 elapsed + 0.1 latency >= 0.5: send now
-        assert ("on", 60, 90) in out.sent
+        lp.note_in("on", 60, 90, now=10.2)
+        lp.note_in("off", 60, now=10.3)
+        lp.note_in("on", 64, 90, now=11.6)
+        lp.note_in("off", 64, now=11.7)
+        lp.close_loop(now=12.0)                  # a 2 s loop
+        lp.toggle_overdub(now=12.0)
+        lp.note_in("on", 67, 90, now=12.5)       # played at 0.5 into the pass
+        lp.note_in("off", 67, now=12.6)
+        lp.poll(now=12.9)
+        lp.toggle_overdub(now=12.9)              # commits the new layer mid-pass
+        lp.poll(now=13.95)
+        ons = [s[1] for s in out.sent if s[0] == "on"]
+        assert ons == [60, 64]                   # 60 once, 64 once, 67 not until next pass
+        lp.poll(now=14.55)
+        assert [s[1] for s in out.sent if s[0] == "on"] == [60, 64, 60, 67]
 
 
 class TestSave:

@@ -53,9 +53,8 @@ murdoch over an outbound connection from the Pi.
 
 Configuration is environment variables, set in `pianod.service` if they ever need changing:
 `PIANO_DATA`, `PIANO_SOCK`, `PIANO_SERIAL`, `PIANO_SERVER` (library source, default
-https://home.fam-mart.in), `PIANO_MIDI_OUT`, `PIANO_MIDI_IN`, `PIANO_LATENCY_MS`, `PIANO_ECHO_MS`, `PIANO_VELOCITY_MAP`
-(default on: every note-on goes through the inverse of the measured DKW10 curve; `0` sends
-velocities as written).
+https://home.fam-mart.in), `PIANO_MIDI_OUT`, `PIANO_MIDI_IN`, `PIANO_ECHO_MS`. Everything about
+how this particular piano responds is in `calibration.json` instead (see the playback model).
 
 ## The panel (badge)
 
@@ -87,9 +86,8 @@ Run a laptop with a 20-line mido probe against the real piano:
    note and its note-off, velocity as the sensors measured it (sent 70, reported 72–75).
    `PIANO_ECHO_MS=250`.
 2. **Latency** — MIDI-in-to-hammer delay; send a note, time its echo. With MIDIIN=REALTIME
-   **62–70 ms** for note-ons, 45–51 ms for note-offs (DELAY IN: 513–520 ms). `PIANO_LATENCY_MS=65`,
-   which the looper uses to play layers early so they land with live playing. Trust ears over
-   this if layers drift.
+   **62–70 ms** for note-ons at velocity 70, 45–51 ms for note-offs (DELAY IN: 513–520 ms).
+   Softer notes take longer — see below; it's per velocity and key in the calibration.
 3. **Dynamics floor** — the minimum solenoid velocity. Middle C, realtime, sent velocity → what
    the key sensors reported → peak loudness on the laptop mic:
 
@@ -100,8 +98,7 @@ Run a laptop with a 20-line mido probe against the real piano:
 
    **Floor: sent 15** (sensor 33); everything below plays the same. The range is compressed —
    sent 15–100 lands as 33–91 — so replaying a take with its recorded velocities comes out
-   louder in quiet passages, every pass. Hence the inverse map (send the velocity whose sensor
-   reading matches the one recorded): `midiio.VelocityMap`, applied to every note sent.
+   louder in quiet passages, every pass. Hence the velocity stage of the playback model.
    Your own playing (keys test): 30–86, sustain pedal reported on MIDI OUT.
 4. **Boot time** — power-on to ready, for the smart-plug warm-up delay (server side, later).
 
@@ -160,8 +157,10 @@ A full calibration cycle run by the Pi itself — started from the badge (SELECT
 `piano calibrate`, with an **optional delayed start** (default 10 minutes, counting down on the
 badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to be left alone.
 
-- **Needs a microphone on the Pi** (the Pi 4 has no audio input: a USB mic), fixed in one place
-  under the lid, so calibrations are comparable over time.
+- **Needs a microphone on the Pi** (the Pi 4's jack is output only: a USB mic, or a USB sound card
+  with a mic in), fixed in one place under the lid, so calibrations are comparable over time. It
+  uses the first capture device it finds, or `PIANO_MIC`, and records the mic's name in the
+  calibration, so a change of mic isn't mistaken for every key drifting.
 - **Preflight**: a test note must come back from the key sensors (proves wagon MIDI on,
   MIDIOUT=KBD OUT, MIDIIN=REALTIME from the ~66 ms echo — DELAY IN shows as ~515 ms), and the
   mic must hear it above the room's noise floor. Fails with a message saying which setting.

@@ -11,7 +11,7 @@ nothing loud. Have the piano switched on and in whatever its normal "play from M
 What it measures, and which pianod setting each one feeds:
 
   1. ECHO      - does solenoid playback come back on MIDI OUT?        -> PIANO_ECHO_MS (0 if not)
-  2. LATENCY   - MIDI-in to key-sensor delay, if there is an echo     -> PIANO_LATENCY_MS
+  2. LATENCY   - MIDI-in to key-sensor delay, if there is an echo     -> (the calibration)
   3. DYNAMICS  - the quietest velocity the solenoids actually play    -> (a velocity map, later)
   4. KEYS      - velocity range of your own playing, soft to loud     -> (sanity check)
 """
@@ -88,15 +88,13 @@ def test_echo_and_latency(outport, inport):
     if not delays:
         print("\nNO ECHO: playback does not appear on MIDI OUT.")
         print("  -> PIANO_ECHO_MS=0 (the gate is not needed)")
-        print("  -> latency can't be measured this way; if loop layers sound late against live")
-        print("     playing, set PIANO_LATENCY_MS by ear in ~20 ms steps.")
+        print("  -> latency can't be measured this way, and neither can a calibration run.")
         return
     avg = sum(delays) / len(delays)
     print(f"\nECHO: {len(delays)}/5 notes came back, after " +
           ", ".join(f"{d * 1000:.0f}" for d in delays) + " ms")
     print(f"  -> PIANO_ECHO_MS={max(150, int(avg * 1000) + 150)}   (echo delay + margin)")
-    print(f"  -> PIANO_LATENCY_MS={int(avg * 1000)}   (if the sensors fire as the hammers strike;")
-    print("     trust your ears over this number when layers feel early or late)")
+    print(f"  -> about {int(avg * 1000)} ms at velocity 70; a calibration run measures it per key")
 
 
 def test_dynamics(outport):
@@ -145,9 +143,8 @@ def main():
     test_echo_and_latency(outport, inport)
     test_dynamics(outport)
     test_keys(inport)
-    print("\nDone. Put the two numbers into image/files/pianod.service as Environment= lines")
-    print("(or export them when running pianod by hand), and note the dynamics floor in")
-    print("docs/design.md.")
+    print("\nDone. Put PIANO_ECHO_MS into image/files/pianod.service, and note anything new in")
+    print("docs/design.md. Per-key timing and velocity are the calibration's job.")
 
 
 if __name__ == "__main__":
