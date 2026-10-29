@@ -22,6 +22,8 @@ import re
 import shutil
 import subprocess
 import unicodedata
+import sys
+
 import requests
 import wikipedia
 from datetime import datetime
@@ -201,7 +203,12 @@ class WikipediaClient:
                 continue # Try the next search term
             except wikipedia.exceptions.PageError:
                 continue # Try the next search term
-        
+            except (ValueError, requests.RequestException) as e:
+                # Wikipedia unreachable or refusing (it answers non-JSON to clients it blocks).
+                # A missing portrait mustn't stop the library publishing; don't cache the miss.
+                logging.warning(f"Wikipedia lookup for {name!r} failed: {e}")
+                return {"name": name, "summary": "", "image_url": None}
+
         if page:
             # We found a page, now get the reliable image
             image_url = self._get_page_image(page_title)
@@ -223,7 +230,8 @@ class MidiLibraryGenerator:
     Main class to orchestrate the static site generation.
     """
 
-    def __init__(self, input_dir, template_dir, output_dir):
+    def __init__(self, input_dir, template_dir, output_dir, ids_from=None):
+        self.ids_from = ids_from
         self.input_dir = pathlib.Path(input_dir)
         self.template_dir = pathlib.Path(template_dir)
         self.output_dir = pathlib.Path(output_dir)
@@ -271,6 +279,48 @@ class MidiLibraryGenerator:
         if template_static_dir.is_dir():
             logging.info("Copying static assets...")
             shutil.copytree(template_static_dir, self.static_dir, dirs_exist_ok=True)
+
+    def _stable_ids(self, files):
+        """Each MIDI file's id, kept in ids.json beside the site so it never changes: the Pi
+        mirrors files by id and never fetches an id twice, and favourites are kept by id. So a
+        file added to the library gets a new id rather than shifting everyone else's. Ids of
+        removed files are never reused.
+
+        The first run (no ids.json yet) takes ids from an already published site if given one
+        (--ids-from, matching files by content: the files may have changed since it was made),
+        or else numbers the files in sorted order, as the generator always did."""
+        path = self.output_dir / "ids.json"
+        known = {}
+        if path.exists():
+            with open(path, encoding="utf-8") as f:
+                known = json.load(f)
+        rel = [f.relative_to(self.input_dir).as_posix() for f in files]
+        if not known and self.ids_from:
+            import hashlib
+            digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()   # noqa: E731
+            published = {}                     # content -> its ids (identical files can repeat)
+            for p in sorted((pathlib.Path(self.ids_from) / "midi-files").glob("*.mid")):
+                published.setdefault(digest(p), []).append(p.stem)
+            for f, r in zip(files, rel):
+                if published.get(digest(f)):
+                    known[r] = published[digest(f)].pop(0)
+            logging.info(f"ids from {self.ids_from}: {len(known)} of {len(rel)} files matched")
+            # published ids that matched nothing stay retired, recorded so they're never reused
+            for stem in sorted(s for stems in published.values() for s in stems):
+                known[f"(retired)/{stem}"] = stem
+        elif not known:
+            known = {r: f"file-id-{i:06d}" for i, r in enumerate(rel)}
+        used = [int(v.rsplit("-", 1)[1]) for v in known.values()]
+        nxt = max(used) + 1 if used else 0
+        for r in rel:
+            if r not in known:
+                known[r] = f"file-id-{nxt:06d}"
+                logging.info(f"New file {r}: {known[r]}")
+                nxt += 1
+        self.output_dir.mkdir(exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(known, f, indent=1, ensure_ascii=False, sort_keys=True)
+        return {f: known[r] for f, r in zip(files, rel)}
 
     def _find_midi_files(self):
         """Finds all.mid files in the input directory."""
@@ -547,6 +597,7 @@ class MidiLibraryGenerator:
         
         logging.info("Building data model...")
         midi_files = self._find_midi_files()
+        ids = self._stable_ids(midi_files)
         
         # Load mappings from CSV and PDFs
         csv_mapping = self._load_pianist_mapping()
@@ -563,8 +614,8 @@ class MidiLibraryGenerator:
             "playlists": {}
         }
 
-        for i, file_path in enumerate(midi_files):
-            file_id = f"file-id-{i:06d}"
+        for file_path in midi_files:
+            file_id = ids[file_path]
             logging.info(f"Processing {file_id}: {file_path.name}")
             
             # 1. Parse metadata
@@ -768,8 +819,22 @@ class MidiLibraryGenerator:
             comp_entry['works'].sort(key=lambda x: x['title'])
             library_data['composers'].append(comp_entry)
 
+        # The catalogue tidied (pianod/pianod/catalogue.py): canonical composers with dates and
+        # eras, the pianists and roll systems in the roll titles, clean titles, lengths. It keeps
+        # every v1 field, so older players still read it.
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "pianod"))
+        from pianod import catalogue, smf
+
+        def duration(work_id):
+            try:
+                events, _ = smf.load(str(self.midi_files_dir / f"{work_id}.mid"))
+                return round(events[-1].time, 1) if events else None
+            except (OSError, ValueError, IndexError, EOFError):
+                return None
+
+        library_data = catalogue.tidy(library_data, duration=duration)
         with open(self.output_dir / "library.json", 'w', encoding='utf-8') as f:
-            json.dump(library_data, f)
+            json.dump(library_data, f, ensure_ascii=False)
 
         logging.info("Site generation complete.")
 
@@ -798,6 +863,11 @@ def main():
         help="Path to the directory where the static site will be generated."
     )
     parser.add_argument(
+        '--ids-from',
+        help="On the first run (no ids.json in the output yet): an already published site whose "
+             "midi-files/ keep their ids, matched by content. Players mirror files by id."
+    )
+    parser.add_argument(
         '--debug',
         action='store_true',
         help="Enable debug logging."
@@ -813,7 +883,8 @@ def main():
         generator = MidiLibraryGenerator(
             args.input_dir,
             args.template_dir,
-            args.output_dir
+            args.output_dir,
+            ids_from=args.ids_from,
         )
         
         # 1. Build the data model
