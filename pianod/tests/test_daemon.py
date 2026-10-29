@@ -83,7 +83,9 @@ def test_long_lists_come_in_pages_the_badge_can_read():
 
 def test_play_composer_runs_the_queue_to_the_end(d):
     ok(d, "play", slug="bach-js")
-    assert wait_for(lambda: not d.player.playing and d.index == 1)
+    # (index 1 and not playing is also true for a moment before the second piece starts)
+    assert wait_for(lambda: not d.player.playing and d.index == 1
+                    and len([s for s in d.out.sent if s[0] == "on"]) == 2)
     ons = [s for s in d.out.sent if s[0] == "on"]
     # A flat file fits to the middle of the piano (sensor 62), sent as 57 by the default curve.
     assert ons == [("on", 60, 57), ("on", 62, 57)]

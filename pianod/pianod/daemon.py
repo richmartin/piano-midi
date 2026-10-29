@@ -22,7 +22,7 @@ import socket
 import threading
 import time
 
-from . import calibrate, calibration, library, looper, midiio, player, smf, store
+from . import calibrate, calibration, library, looper, midiio, network, player, smf, store
 
 LOG = logging.getLogger("pianod")
 
@@ -174,7 +174,8 @@ class Pianod:
             reply = self._handle(cmd, req)
         except (ValueError, KeyError, TypeError, OSError, looper.LooperError) as e:
             return {"ok": False, "error": str(e)}
-        if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary"):
+        if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
+                       "net", "wifi_scan", "wifi_log"):
             self._push()
         return {"ok": True, **(reply or {})}
 
@@ -185,7 +186,7 @@ class Pianod:
         with self.lock:
             if self._calibrating() and cmd not in (
                     "status", "composers", "works", "recordings", "queue", "calibrate_cancel",
-                    "calibrate_summary", "panic"):
+                    "calibrate_summary", "panic", "net", "wifi_scan", "wifi_join", "wifi_log"):
                 raise ValueError("calibrating (cancel it first)")
             if cmd == "status":
                 return {"state": self.state()}
@@ -324,6 +325,18 @@ class Pianod:
                 if self.player.playing:
                     raise ValueError("busy playing; sync later")
             return self.lib.sync(SERVER_URL)
+        # The network (the panel is the Pi's only screen): slow, so outside the lock.
+        if cmd == "net":
+            return {"net": network.status()}
+        if cmd == "wifi_scan":
+            return {"networks": network.scan()}
+        if cmd == "wifi_join":
+            ok, msg = network.join(req["ssid"], req.get("psk") or None)
+            if not ok:
+                raise ValueError(msg)
+            return {"message": msg}
+        if cmd == "wifi_log":
+            return page(req, "lines", network.log())
         raise ValueError(f"unknown command {cmd!r}")
 
     def _run_calibration(self):

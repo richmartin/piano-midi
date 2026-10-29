@@ -23,6 +23,7 @@ T = {
     "m_sync": "Update the library",
     "m_calibrate": "Calibrate the piano",
     "m_calibrate_nomic": "Calibrate (needs a mic)",
+    "m_network": "Network (WiFi)",
     "m_info": "About this panel",
     "hint_choose": "UP/DOWN  > choose  < back",
     "hint_back": "< back",
@@ -83,6 +84,25 @@ T = {
     "synced": "Library updated",
     "synced_body": "{works} pieces ({fetched} new)",
 
+    # network
+    "net_title": "Network",
+    "net_checking": "Checking the network...",
+    "wifi": "WiFi: {s}",
+    "not_connected": "not connected",
+    "net_state": "State: {s}",
+    "ip": "IP:   {s}",
+    "join": "Join a network...",
+    "net_log": "Show the WiFi log",
+    "net_reading": "Reading the log...",
+    "refresh": "Refresh",
+    "scanning": "Looking for networks...",
+    "no_nets": "No networks found",
+    "no_nets_body": "Try again in a moment.",
+    "choose_net": "Choose a network",
+    "password": "Password: {s}",
+    "joining": "Joining (up to a minute)",
+    "ok_wifi": "Connected",
+
     # info
     "info_title": "About",
     "i_link": "Pi link: {s}",
@@ -105,6 +125,7 @@ T = {
     "restart": "Restarting...",
     "hint_kb": "A type B delete ST abc/ABC",
     "hint_kb2": "d-pad move  OK when done",
+    "hint_kb_sym": "A type B del ST abc/ABC/#!",
 }
 
 

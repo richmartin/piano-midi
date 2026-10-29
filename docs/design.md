@@ -64,6 +64,14 @@ record → close loop → overdub), **B** = stop (in Performance: end take / sto
 **SELECT** = menu, d-pad = navigate (home: volume and prev/next). Layout maths live in
 `layout.py`, pure Python, tested on the laptop — including that every hint fits in 26 characters.
 
+The panel is the Pi's only screen, so it also does the network (from hotpi): **Network (WiFi)**
+shows the connection, state and IP, joins a network (password on the keyboard, with a symbols
+set), and shows NetworkManager's last log lines — the journal is in RAM, but readable while the
+Pi is up, which is how a failed join gets diagnosed without a monitor. A join that fails on a
+secured network is tried once more with management-frame protection off (the Pi 4's WiFi and
+WPA2/WPA3 transition networks). Long lists (composers, works, the log) come from pianod in pages
+under the panel's 4 KB line limit.
+
 ## The piano: Yamaha Disklavier "Wagon Grand", control wagon DKW10
 
 Wagon settings pianod needs (both on the wagon's front panel):

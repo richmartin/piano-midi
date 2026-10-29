@@ -12,7 +12,7 @@
 #   d-pad   home: UP/DOWN volume, LEFT/RIGHT previous/next piece
 #           menus: UP/DOWN move, RIGHT chooses, LEFT back
 #           Performance mode: UP undo, DOWN redo
-# (The take-naming keyboard is the one exception: there A types and B deletes.)
+# (The keyboard - naming a take, a WiFi password - is the one exception: A types, B deletes.)
 # The screen dims after a minute; the first press only wakes it.
 
 import json
@@ -260,15 +260,17 @@ def choose(title, options, start=0, hint_text=None, dim=()):
 
 
 KEYSETS = ("abcdefghijklmnopqrstuvwxyz0123456789", "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+SYMBOLS = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"     # passwords: a third set
 OK_KEY = "\x00"     # the last cell of every set: done
 
 
-def keyboard(title):
+def keyboard(title, symbols=False):
     """The one screen where A and B type: d-pad picks a key, A types it, B deletes (on empty:
     back), START changes the character set, the OK cell finishes. SELECT still goes home."""
     s, ks, pos, cols = "", 0, 0, 12
+    sets = KEYSETS + (SYMBOLS,) if symbols else KEYSETS
     while True:
-        chars = KEYSETS[ks] + " " + OK_KEY
+        chars = sets[ks] + " " + OK_KEY
         g = screen()
         text(g, title[:26], 4, 2, CYAN)
         text(g, s[-24:] + "_", 4, 18, WHITE)
@@ -279,7 +281,7 @@ def keyboard(title):
                 rect(g, x - 3, y - 2, 12 if c != OK_KEY else 20, 15, 0x305080)
             shown = "OK" if c == OK_KEY else (c if c != " " else "_")
             text(g, shown, x, y, (GREEN if c == OK_KEY else WHITE) if i == pos else GREY)
-        text(g, t("hint_kb"), W // 2, H - 14, DIM, 1, (0.5, 1.0))
+        text(g, t("hint_kb_sym" if symbols else "hint_kb"), W // 2, H - 14, DIM, 1, (0.5, 1.0))
         hint(g, t("hint_kb2"))
         k = wait_key()
         if k == SELECT:
@@ -302,8 +304,8 @@ def keyboard(title):
                 return None
             s = s[:-1]
         elif k == START:
-            ks = (ks + 1) % len(KEYSETS)
-            pos = min(pos, len(KEYSETS[ks]))
+            ks = (ks + 1) % len(sets)
+            pos = min(pos, len(sets[ks]) + 1)
 
 
 def report(r, ok_key="ok"):
@@ -404,7 +406,7 @@ def draw_home(st):
 def menu():
     entries = (("m_browse", browse), ("m_recordings", recordings), ("m_perform", performance),
                ("m_shuffle", shuffle_all), ("m_sync", sync), ("m_calibrate", calibrate),
-               ("m_info", info))
+               ("m_network", network), ("m_info", info))
     start = 0
     while True:
         # Calibrate is greyed out until pianod has found a mic that works: a calibration set
@@ -497,6 +499,58 @@ def info():
                else t("i_none")),
              t("i_mode", s=st.get("mode", "-"))]
     choose(t("info_title"), lines, 0, t("hint_back"))
+
+
+# --- network: the panel is the Pi's only screen ----------------------------------------------
+def network():
+    sel = 3
+    while True:
+        message(t("net_checking"), "", WHITE, 0)
+        r = link.request("net", timeout=15)
+        net = (r or {}).get("net") or {}
+        wifi = net.get("wifi") or {}
+        state = wifi.get("state") or net.get("error") or "-"
+        lines = [t("wifi", s=wifi.get("ssid") or t("not_connected")), t("net_state", s=state),
+                 t("ip", s=net.get("ip") or "-"), t("join"), t("net_log"), t("refresh")]
+        i = choose(t("net_title"), lines, sel)
+        if i is None:
+            return
+        sel = i
+        if i == 3:
+            join_network()
+        elif i == 4:
+            wifi_log()
+
+
+def join_network():
+    message(t("scanning"), "", WHITE, 0)
+    r = link.request("wifi_scan", timeout=40)
+    nets = (r or {}).get("networks") or []
+    if not nets:
+        message(t("no_nets"), t("no_nets_body"), ORANGE)
+        return
+    i = choose(t("choose_net"), ["%s %d%%" % (n["ssid"][:20], n["signal"]) for n in nets])
+    if i is None:
+        return
+    n = nets[i]
+    psk = keyboard(t("password", s=n["ssid"][:14]), symbols=True) if n["secure"] else ""
+    if psk is None:
+        return
+    message(t("joining"), n["ssid"], WHITE, 0)
+    report(link.request("wifi_join", timeout=100, ssid=n["ssid"], psk=psk), "ok_wifi")
+
+
+def wifi_log():
+    """NetworkManager's last lines, newest at the bottom: why a join failed."""
+    message(t("net_reading"), "", WHITE, 0)
+    lines, failed = fetch("wifi_log", "lines")
+    if lines is None:
+        report(failed)
+        return
+    rows = []
+    for line in lines:
+        rows += wrap(line, 26) or [""]
+    choose(t("net_log"), rows or ["-"], max(0, len(rows) - 1), t("hint_back"))
 
 
 # --- performance mode: the loop station -----------------------------------------------------
