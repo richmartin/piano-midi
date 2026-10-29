@@ -560,14 +560,10 @@ class NowPlaying(ui.Screen):
         self.pos = self.text(4, 87, "label", MUTED)
         self.next = self.text(W // 2, 87, "label", FAINT, (0.5, 0), room=80)
         self.len = self.text(W - 4, 87, "label", MUTED, (1, 0))
-        self.keys = ui.Keys(self.g, 98, 17)
-        self.warn = self.box(0, H - layout.HINT_H, W, layout.HINT_H, FELT)
-        self.warn_text = self.text(W // 2, H - 9, "label", IVORY, (0.5, 0), text=t("no_piano"))
+        self.keys = ui.Keys(self, 98, 17)
         self.hints([("A", t("h_pause")), ("B", t("h_stop")), ("<>", t("h_skip")), ("A+", t("h_star"))])
-        self.g.remove(self.warn.node)          # above the hints
-        self.g.append(self.warn.node)
-        self.g.remove(self.warn_text.lb)
-        self.g.append(self.warn_text.lb)
+        self.warn = self.box(0, H - layout.HINT_H, W, layout.HINT_H, FELT)       # over the hints
+        self.warn_text = self.text(W // 2, H - 9, "label", IVORY, (0.5, 0), text=t("no_piano"))
         # the volume card, over everything, shown for a moment after a change
         self.card = self.box(20, 30, W - 40, 50, PANEL)
         self.card_label = self.text(W // 2, 35, "label", MUTED, (0.5, 0), text=t("volume"))
@@ -676,11 +672,11 @@ class Perf(ui.Screen):
         self.x0 = x0
         for n in range(3):
             self.text(4, 19 + n * 12, "label", FAINT, text=str(n + 1))
-        self.lanes = ui.Lanes(self.g, x0, 18, LANE_CELLS, self.cell)
+        self.lanes = ui.Lanes(self, x0, 18, LANE_CELLS, self.cell)
         self.head = self.box(x0, 16, 1, 37, IVORY)
         self.big = self.text(4, 57, "title", IVORY)
         self.side = self.text(W - 4, 60, "body", MUTED, (1, 0), room=70)
-        self.keys = ui.Keys(self.g, 82, 18)
+        self.keys = ui.Keys(self, 82, 18)
         self.hints([("A", ""), ("B", ""), ("^v", t("h_undo")), ("ST", t("h_save"))])
         self.a_hint = self.text(3 + ui.width("label", "A") + 6, H - 9, "label", MUTED)
         self.b_hint = self.text(60, H - 9, "label", MUTED)
@@ -850,7 +846,7 @@ class CalView(ui.Screen):
         self.left = self.text(W - 4, 4, "label", MUTED, (1, 0))
         self.key = self.text(4, 15, "big", IVORY, room=60)
         self.what = self.text(58, 22, "body", MUTED, room=W - 62)
-        self.keys = ui.Keys(self.g, 48, 22)
+        self.keys = ui.Keys(self, 48, 22)
         self.count = self.text(4, 76, "body_b", IVORY)
         self.bad = self.text(W - 4, 76, "body", FELT, (1, 0))
         self.msg = self.text(4, 92, "body", MUTED)

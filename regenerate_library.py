@@ -428,6 +428,8 @@ class MidiLibraryGenerator:
                         # If the name contains "   ", split and take the last part?
                         if "   " in full_name:
                             full_name = full_name.split("   ")[-1].strip()
+                        if sum(ch.isalpha() for ch in full_name) < 3:
+                            continue        # only punctuation or spaces before the dates
 
                         display_name = f"{full_name} ({dates})"
                         
@@ -482,13 +484,21 @@ class MidiLibraryGenerator:
                     mapping[row['Slug']] = row['DisplayName']
         return mapping
 
+    @staticmethod
+    def _copy(src, dst):
+        """The bytes and the times, nothing else: copy2 also reads extended attributes, which an
+        rclone mount (murdoch's gdrive) refuses with EIO."""
+        shutil.copyfile(src, dst)
+        st = src.stat()
+        os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
+
     def _smart_copy(self, src, dst):
         """
         Copies src to dst only if dst doesn't exist or is different.
         Checks file size and modification time.
         """
         if not dst.exists():
-            shutil.copy2(src, dst) # copy2 preserves metadata
+            self._copy(src, dst)
             return True
         
         src_stat = src.stat()
@@ -496,12 +506,12 @@ class MidiLibraryGenerator:
         
         # Check size
         if src_stat.st_size != dst_stat.st_size:
-            shutil.copy2(src, dst)
+            self._copy(src, dst)
             return True
             
         # Check mtime (if src is newer than dst)
         if src_stat.st_mtime > dst_stat.st_mtime:
-            shutil.copy2(src, dst)
+            self._copy(src, dst)
             return True
             
         return False

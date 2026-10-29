@@ -53,7 +53,7 @@ murdoch over an outbound connection from the Pi.
 
 Configuration is environment variables, set in `pianod.service` if they ever need changing:
 `PIANO_DATA`, `PIANO_SOCK`, `PIANO_SERIAL`, `PIANO_SERVER` (library source, default
-https://home.fam-mart.in), `PIANO_MIDI_OUT`, `PIANO_MIDI_IN`, `PIANO_ECHO_MS`. Everything about
+http://piano.fam-mart.in, LAN only), `PIANO_MIDI_OUT`, `PIANO_MIDI_IN`, `PIANO_ECHO_MS`. Everything about
 how this particular piano responds is in `calibration.json` instead (see the playback model).
 
 ## The panel (badge)
@@ -261,7 +261,8 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   pianod, so an old library.json still browses properly on the Pi.
 - The web player only controls the Pi and piano: the old remote-control features (a phone
   driving a browser that played to the piano) and the Output Device selector go.
-- pianod's `PIANO_SERVER` changes to `http://piano.fam-mart.in` once it's live.
+- pianod syncs from `http://piano.fam-mart.in` (live 2026-10-29: 600 of 609 files kept their ids,
+  matched by content; 9 new).
 
 ## Later (server side, not in this repo yet)
 

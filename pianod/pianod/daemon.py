@@ -29,7 +29,7 @@ LOG = logging.getLogger("pianod")
 DATA = os.environ.get("PIANO_DATA", "/var/lib/piano")
 SOCK = os.environ.get("PIANO_SOCK", "/run/piano/pianod.sock")
 SERIAL_GLOB = os.environ.get("PIANO_SERIAL", "/dev/serial/by-id/*Adafruit*-if02")
-SERVER_URL = os.environ.get("PIANO_SERVER", "https://home.fam-mart.in")
+SERVER_URL = os.environ.get("PIANO_SERVER", "http://piano.fam-mart.in")     # LAN only
 PAGE_BYTES = 3000              # the badge drops any line over 4 KB: lists go in pages under it
 
 

@@ -30,14 +30,15 @@ fi
 BUILD=$(mktemp -d); trap 'rm -rf "$BUILD"' EXIT
 for f in "${PLAIN[@]}"; do cp "$HERE/CIRCUITPY/$f" "$BUILD/"; done
 for m in "${COMPILED[@]}"; do "$MPY_CROSS" -o "$BUILD/$m.mpy" "$HERE/CIRCUITPY/$m.py"; done
-cp -r "$HERE/CIRCUITPY/lib" "$HERE/CIRCUITPY/fonts" "$BUILD/"
-# The same modules as .py would win over the .mpy: remove any left from an older deploy.
-STALE=$(printf '%s.py ' "${COMPILED[@]}")
+cp -r "$HERE/CIRCUITPY/fonts" "$BUILD/"
+# The same modules as .py would win over the .mpy: remove any left from an older deploy, and
+# what the panel no longer uses (the display_text and bitmap_font libraries, PCF fonts).
+STALE="$(printf '%s.py ' "${COMPILED[@]}") lib fonts/*.pcf memtest.py"
 
 if [ $# -eq 0 ]; then
   dest=$(findmnt -rno TARGET -S LABEL=CIRCUITPY | head -1)
   [ -n "$dest" ] || { echo "no CIRCUITPY drive mounted here" >&2; exit 1; }
-  for f in $STALE; do rm -f "$dest/$f"; done
+  (cd "$dest" && rm -rf $STALE)
   cp -r "$BUILD"/. "$dest/"
   sync
   echo "deployed to $dest"
@@ -51,7 +52,7 @@ else
     [ -b \"\$dev\" ] || { echo \"no CIRCUITPY drive on \$(hostname): is the badge plugged in?\" >&2; exit 1; }
     # Mountable without sudo through the image's fstab entry.
     mount /mnt/circuitpy
-    for f in $STALE; do rm -f /mnt/circuitpy/\$f; done
+    (cd /mnt/circuitpy && rm -rf $STALE)
     cp -r \$tmp/. /mnt/circuitpy/
     sync; umount /mnt/circuitpy
     echo \"deployed to the badge on \$(hostname)\""

@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Make the panel's bitmap fonts: TTF -> 1-bit glyphs -> BDF -> PCF (bdftopcf), plus a width
-table for the laptop tests.
+"""Make the panel's fonts: TTF -> 1-bit glyphs -> fonts/<name>.fnt, plus a width table for the
+laptop tests.
 
 The badge draws 1-bit glyphs, so each glyph is rendered here exactly as the mockups were (PIL,
 fontmode "1") and stored as a bitmap: what you see in the mockups is what the badge shows.
+
+The .fnt format is the panel's own (ui.Font reads it), made for 192 KB of RAM: glyphs stay in
+flash and are read one at a time, a byte per pixel, ready for bitmaptools.arrayblit.
+    header  b"PF1\0", ascent u8, descent u8, glyph count u16
+    table   per glyph, by codepoint: cp u16, w u8, h u8, xoff i8, yoff i8, advance u8, data offset u32
+    data    w*h bytes per glyph, 0 or 1; yoff is from the baseline up to the glyph's bottom
 
     python3 badge/tools/mkfonts.py <dir with the TTFs>
 
@@ -13,7 +19,7 @@ The TTFs (Google Fonts, OFL) aren't kept in the repo; the generated fonts are:
 """
 import json
 import os
-import subprocess
+import struct
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
@@ -46,19 +52,12 @@ def glyph(font, ch, asc):
     advance = round(font.getlength(ch))
     box = img.getbbox()
     if not box:
-        return advance, 1, 1, 0, 0, ["00"]     # a blank pixel: PCF readers choke on 0x0
+        return advance, 0, 0, 0, 0, b""
     left, top, right, bottom = box
     w, h = right - left, bottom - top
-    rows = []
-    for y in range(top, bottom):
-        bits = 0
-        for x in range(left, right):
-            bits = (bits << 1) | (1 if img.getpixel((x, y)) else 0)
-        nbytes = (w + 7) // 8
-        bits <<= nbytes * 8 - w
-        rows.append(f"{bits:0{nbytes * 2}X}")
-    # BDF offsets: from the origin (baseline, pen position) to the bitmap's bottom-left.
-    return advance, w, h, left - pad, (pad + asc) - bottom, rows
+    data = bytes(1 if img.getpixel((x, y)) else 0 for y in range(top, bottom) for x in range(left, right))
+    # offsets from the origin (baseline, pen position) to the bitmap's bottom-left
+    return advance, w, h, left - pad, (pad + asc) - bottom, data
 
 
 def make(name, path, size, var):
@@ -73,22 +72,17 @@ def make(name, path, size, var):
             g = glyph(font, ch, asc)
         except (OSError, ValueError):
             continue
-        if ch != " " and (g[5] == ["00"] or g[1:] == missing):
+        if ch != " " and (not g[5] or g[1:] == missing):
             continue                      # the font doesn't have it
         glyphs.append((ch, g))
-    lines = ["STARTFONT 2.1", f"FONT piano-{name}", f"SIZE {size} 75 75",
-             f"FONTBOUNDINGBOX {size * 2} {asc + desc} 0 {-desc}",
-             "STARTPROPERTIES 2", f"FONT_ASCENT {asc}", f"FONT_DESCENT {desc}", "ENDPROPERTIES",
-             f"CHARS {len(glyphs)}"]
-    for ch, (adv, w, h, xoff, yoff, rows) in glyphs:
-        lines += [f"STARTCHAR U+{ord(ch):04X}", f"ENCODING {ord(ch)}", f"SWIDTH {adv * 1000 // size} 0",
-                  f"DWIDTH {adv} 0", f"BBX {w} {h} {xoff} {yoff}", "BITMAP", *rows, "ENDCHAR"]
-    lines.append("ENDFONT")
-    bdf = os.path.join(OUT, f"{name}.bdf")
-    with open(bdf, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    subprocess.run(["bdftopcf", "-o", os.path.join(OUT, f"{name}.pcf"), bdf], check=True)
-    os.remove(bdf) if not os.environ.get("KEEP_BDF") else None
+    glyphs.sort(key=lambda cg: ord(cg[0]))
+    table, data = b"", b""
+    base = 8 + 11 * len(glyphs)
+    for ch, (adv, w, h, xoff, yoff, bits) in glyphs:
+        table += struct.pack("<HBBbbBI", ord(ch), w, h, xoff, yoff, adv, base + len(data))
+        data += bits
+    with open(os.path.join(OUT, f"{name}.fnt"), "wb") as f:
+        f.write(b"PF1\0" + struct.pack("<BBH", asc, desc, len(glyphs)) + table + data)
     return {ch: g[0] for ch, g in glyphs}, asc, desc
 
 
