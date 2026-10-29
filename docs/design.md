@@ -100,7 +100,7 @@ Run a laptop with a 20-line mido probe against the real piano:
 
    **Floor: sent 15** (sensor 33); everything below plays the same. The range is compressed —
    sent 15–100 lands as 33–91 — so replaying a take with its recorded velocities comes out
-   louder in quiet passages, every pass. Wants an inverse map (send the velocity whose sensor
+   louder in quiet passages, every pass. Hence the inverse map (send the velocity whose sensor
    reading matches the one recorded): `midiio.VelocityMap`, applied to every note sent.
    Your own playing (keys test): 30–86, sustain pedal reported on MIDI OUT.
 4. **Boot time** — power-on to ready, for the smart-plug warm-up delay (server side, later).
