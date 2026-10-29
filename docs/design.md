@@ -140,7 +140,9 @@ Every note goes through two independent stages before it reaches the piano:
      floor (a measured curve can replace it). Calibrated by loudness on the mic, not the sensors
      alone: a 40-year-old sensor can be off while its hammer is fine.
    - **Latency**: send the note-on `l_on(ov, k)` early so it strikes on time, and the note-off
-     `l_off(k)` early (the dampers: ~45–50 ms). Pedals get their own `l(cc)`.
+     `l_off(k)` early (the dampers: ~45–50 ms). Under the pedal, strikes are weaker and so
+     slower: `l_on_p(ov, k)`. The sustain pedal goes `l_cc_down` / `l_cc_up` early, measured from
+     its own echo; other pedals an assumed 48 ms.
    - **Duration**: the hold actually sent is `id + l_on − l_off`, which already lengthens soft
      notes; then enforce `max(md(ov, k), …)` on it.
    - **Re-strike**: a key needs `mr(k)` after its note-off before it can sound again; if the next
@@ -192,7 +194,8 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
 - **With the pedal down, per key**: the curve again at 12 / 20 / 30 / 45 / 60, pedal held,
   sensor only (lifting the dampers is noisy). Near the floor a note sounds only sometimes, so from the bottom
   up each velocity is tried up to 3 times and counts only if every try sounds; above the first
-  that does, one try each (~5 more minutes). Found because, after the second full calibration,
+  that does, one try each (~5 more minutes). These strikes also give the strike time under the
+  pedal, and every one times the pedal itself, down and up, from its echo. Found because, after the second full calibration,
   the Gnossienne still lost 23 of 980 notes, all soft accompaniment. Notes fired together were
   the first suspect, but measured alone they cost 0–1 sensor units and never missed (192 notes in
   chords of 2–4). The pedal was it: in the Gnossienne, soft notes under the pedal missed 9%

@@ -43,8 +43,11 @@ class FakePiano:
         if hold < self.md_true(k, v):
             return Strike()
         s = self.sensor(k, v, pedal)
+        timing = {"pedal_down": 0.090, "pedal_up": 0.120} if pedal else {}
         if s < 20:
-            return Strike()
+            return Strike(**timing)
+        if pedal:                              # weaker under the pedal, so slower to land
+            return Strike(sensed=s, l_on=0.25 - v * 0.001, l_off=0.048, **timing)
         return Strike(sensed=s, l_on=0.2 - v * 0.001, l_off=0.048,
                       db=(10 + 0.5 * (s + (12 if k == 48 else 0))) if listen else None)
 
@@ -240,3 +243,15 @@ def test_a_pedal_velocity_that_only_sometimes_sounds_is_not_the_floor():
     tries = c.raw[50]["curve_p"]
     assert len(tries[20]) == 2 and not tries[20][-1]["sensed"]      # stopped at the miss
     assert len(tries[30]) == 3 and len(tries[45]) == 1              # then reliable: one try
+
+
+def test_the_pedal_is_timed_and_strikes_under_it_get_their_own_latency(tmp_path):
+    c = run(FakePiano(), keys=(50, 51))
+    cal = c.calibration()
+    assert (cal.l_cc_down, cal.l_cc_up) == (0.090, 0.120)
+    assert abs(cal.l_on(50, 30, pedal=True) - 0.22) < 1e-6
+    assert abs(cal.l_on(50, 30) - 0.17) < 1e-6
+    summary = c.save(str(tmp_path), Calibration())
+    assert "the pedal goes down in 90 ms, up in 120 ms" in summary
+    back = calibration.load(str(tmp_path / "calibration.json"))
+    assert (back.l_cc_down, back.l_cc_up) == (0.090, 0.120)

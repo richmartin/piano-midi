@@ -113,6 +113,18 @@ class TestPedal:
         assert cal.velocity(60, 100, pedal=True) == cal.velocity(60, 100)
         assert cal.velocity(60, 1, pedal=True) == 30                     # its own floor
 
+    def test_the_pedal_goes_early_by_its_own_measured_times(self):
+        cal = Calibration({"60": {"l_on_p": [[0, 0.2]]}}, l_cc_down=0.09, l_cc_up=0.12)
+        ev = sorted(notes((60, 1, 1.5, 64), (60, 3, 3.5, 64))
+                    + [Event("cc", 2, 64, 127), Event("cc", 4, 64, 0), Event("cc", 4, 67, 127)],
+                    key=lambda e: e.time)
+        r = cal.render(ev, AS_IS)
+        cc = {(s.a, s.b): s.time for s in r if s.kind == "cc"}
+        assert abs(cc[(64, 127)] - 1.91) < 1e-9 and abs(cc[(64, 0)] - 3.88) < 1e-9
+        assert abs(cc[(67, 127)] - (4 - calibration.L_CC)) < 1e-9
+        ons = [s.time for s in r if s.kind == "on"]
+        assert abs(ons[0] - (1 - cal.l_on(60, 60))) < 1e-9 and abs(ons[1] - 2.8) < 1e-9
+
     def test_no_pedal_curve_no_change(self):
         cal = Calibration()
         assert cal.velocity(60, 40, pedal=True) == cal.velocity(60, 40)

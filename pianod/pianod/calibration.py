@@ -6,7 +6,9 @@ loud, in the piano's own key-sensor units. render() turns them into what to *sen
   velocity   ov = clamp(iv * sv(k) + mv(k)); with the sustain pedal down at the strike, a soft
              note strikes weaker (C3 at 20-30: 15-20 dB quieter), so the key's pedal curve,
              sv_p / mv_p, from its own floor v_min_p — whichever asks for more
-  latency    the note-on goes l_on(ov, k) early, the note-off l_off(k) early, pedals l_cc early
+  latency    the note-on goes l_on(ov, k) early (l_on_p under the pedal: weaker strikes are
+             slower), the note-off l_off(k) early; the sustain pedal l_cc_down / l_cc_up early,
+             other pedals l_cc
   duration   the hold sent is at least md(ov, k), or the hammer is pulled back before it lands
   re-strike  a key needs mr(k) between its note-off and its next note-on to sound again
 
@@ -38,7 +40,7 @@ DEFAULTS = {
     "md": [[15, 0.150], [30, 0.120], [60, 0.060]],
     "mr": 0.100,               # not yet measured: a guess from the Gnossienne's re-strikes
 }
-L_CC = 0.048                   # pedals, not yet measured: assumed to move like the dampers
+L_CC = 0.048                   # pedals, unless measured: assumed to move like the dampers
 MIN_VELOCITY = 12              # every key sounded at 12 when held long enough
 
 
@@ -62,9 +64,13 @@ def _interp(points, x: float) -> float:
 
 
 class Calibration:
-    def __init__(self, keys: dict | None = None, l_cc: float = L_CC, info: dict | None = None):
+    def __init__(self, keys: dict | None = None, l_cc: float = L_CC, info: dict | None = None,
+                 l_cc_down: float | None = None, l_cc_up: float | None = None):
         self.keys = {int(k): {**DEFAULTS, **v} for k, v in (keys or {}).items()}
         self.l_cc = l_cc
+        # the sustain pedal, measured from its own echo: lifting the dampers and dropping them
+        self.l_cc_down = l_cc if l_cc_down is None else l_cc_down
+        self.l_cc_up = l_cc if l_cc_up is None else l_cc_up
         self.info = info or {}             # when, which mic: whatever the run recorded
 
     def _p(self, key: int) -> dict:
@@ -79,8 +85,14 @@ class Calibration:
             floor = p.get("v_min_p", MIN_VELOCITY)
         return max(floor, min(127, round(v)))
 
-    def l_on(self, key: int, ov: int) -> float:
-        return min(LEAD, _interp(self._p(key)["l_on"], ov))
+    def l_on(self, key: int, ov: int, pedal: bool = False) -> float:
+        p = self._p(key)
+        return min(LEAD, _interp(p["l_on_p"] if pedal and p.get("l_on_p") else p["l_on"], ov))
+
+    def l_pedal(self, control: int, value: int) -> float:
+        if control != 64:
+            return min(LEAD, self.l_cc)
+        return min(LEAD, self.l_cc_down if value >= 64 else self.l_cc_up)
 
     def l_off(self, key: int) -> float:
         return self._p(key)["l_off"]
@@ -96,7 +108,7 @@ class Calibration:
         """Sound-time events -> send-time events. `loudness` maps a file velocity to the
         sensor velocity wanted; 0 means don't play the note."""
         end = events[-1].time if events else 0.0
-        notes: list[list] = []                       # [key, t_on, t_off, ov]
+        notes: list[list] = []                       # [key, t_on, t_off, ov, pedal]
         open_: dict[int, list] = {}
         pedal = False                                # the sustain pedal, in sound time
         for e in events:
@@ -106,19 +118,19 @@ class Calibration:
                 if e.a in open_:                     # re-struck without a note-off: end it here
                     open_.pop(e.a)[2] = e.time
                 iv = loudness(e.b)
-                note = [e.a, e.time, end, self.velocity(e.a, iv, pedal) if iv > 0 else 0]
+                note = [e.a, e.time, end, self.velocity(e.a, iv, pedal) if iv > 0 else 0, pedal]
                 notes.append(note)
                 open_[e.a] = note
             elif e.kind == "off" and e.a in open_:
                 open_.pop(e.a)[2] = e.time
 
-        out: list[Sent] = [Sent("cc", e.time - self.l_cc, e.a, e.b, e.time)
+        out: list[Sent] = [Sent("cc", e.time - self.l_pedal(e.a, e.b), e.a, e.b, e.time)
                            for e in events if e.kind == "cc"]
         by_key: dict[int, list] = {}
-        for key, t_on, t_off, ov in notes:
+        for key, t_on, t_off, ov, pedal in notes:
             if not ov:
                 continue
-            s_on = t_on - self.l_on(key, ov)
+            s_on = t_on - self.l_on(key, ov, pedal)
             s_off = max(t_off - self.l_off(key), s_on + self.md(key, ov))
             by_key.setdefault(key, []).append([s_on, s_off, t_on, t_off, ov])
         for key, ns in by_key.items():
@@ -137,6 +149,7 @@ class Calibration:
     # --- the file -------------------------------------------------------------------------
     def to_json(self) -> dict:
         return {"version": 1, "info": self.info, "l_cc": self.l_cc,
+                "l_cc_down": self.l_cc_down, "l_cc_up": self.l_cc_up,
                 "keys": {str(k): v for k, v in sorted(self.keys.items())}}
 
 
@@ -147,7 +160,8 @@ def load(path: str) -> Calibration:
             d = json.load(f)
         if d.get("version") != 1:
             raise ValueError(f"unknown version {d.get('version')!r}")
-        cal = Calibration(d.get("keys", {}), d.get("l_cc", L_CC), d.get("info", {}))
+        cal = Calibration(d.get("keys", {}), d.get("l_cc", L_CC), d.get("info", {}),
+                          d.get("l_cc_down"), d.get("l_cc_up"))
         LOG.info("calibration: %s (%d keys)", path, len(cal.keys))
         return cal
     except FileNotFoundError:

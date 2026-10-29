@@ -7,6 +7,8 @@ For each of the 88 keys (docs/design.md, "Calibrate"):
             mic heard it (a cross-check on the sensor)
   pedal     a held note at each of CURVE_P_V with the sustain pedal down: soft notes strike
             weaker then (-> sv_p, mv_p, and v_min_p, the least velocity that still sounds).
+            The strike time with the pedal down (-> l_on_p), and the pedal's own echo: how
+            long it takes to go down and come up (-> l_cc_down, l_cc_up, for the whole piano).
             Near the floor a note sounds only sometimes, so from the bottom up each velocity
             gets up to CURVE_P_TRIES tries, and counts only if all of them sound
   md        at each of MD_V, the shortest hold that still sounds, by bisection
@@ -82,6 +84,8 @@ class Strike:
     l_on: float | None = None          # note-on sent -> sensor note-on
     l_off: float | None = None         # note-off sent -> sensor note-off
     db: float | None = None            # mic peak above the room, if there is a mic
+    pedal_down: float | None = None    # with the pedal: pedal-down sent -> its echo
+    pedal_up: float | None = None      # pedal-up sent -> its echo
 
 
 # --- the analysis (pure) ------------------------------------------------------------------
@@ -143,6 +147,9 @@ def key_params(curve: dict, md: dict, mr: float | None,
                     break
                 v_min = v
             p["v_min_p"] = v_min
+        l_on = [[v, round(s.l_on, 4)] for v, s in sorted(curve_p.items()) if s.l_on is not None]
+        if l_on:
+            p["l_on_p"] = l_on
         else:
             flags.append("with the pedal down: no usable curve")
     l_on = [[v, round(s.l_on, 4)] for v, s in sorted(curve.items()) if s.l_on is not None]
@@ -312,14 +319,24 @@ class Calibrator:
             tries[v] = ss
             if all(s.sensed for s in ss):
                 reliable = True
-                curve[v] = Strike(sensed=round(statistics.median(s.sensed for s in ss)))
+                curve[v] = Strike(sensed=round(statistics.median(s.sensed for s in ss)),
+                                  l_on=statistics.median(s.l_on for s in ss))
             else:
                 curve[v] = Strike()
         return curve, tries
 
+    def pedal_latency(self) -> tuple[float | None, float | None]:
+        """The median pedal-down and pedal-up echo times over every pedalled strike."""
+        def median(field):
+            xs = [s[field] for r in self.raw.values() for ss in r.get("curve_p", {}).values()
+                  for s in ss if s.get(field) is not None]
+            return round(statistics.median(xs), 4) if xs else None
+        return median("pedal_down"), median("pedal_up")
+
     def calibration(self) -> Calibration:
         return Calibration(self.params, L_CC,
-                           {**self.info, "flags": {key_name(k): f for k, f in self.flags.items()}})
+                           {**self.info, "flags": {key_name(k): f for k, f in self.flags.items()}},
+                           *self.pedal_latency())
 
     def save(self, data_dir: str, previous: Calibration) -> list[str]:
         """Write the new calibration (keeping the old), its raw data; return a summary."""
@@ -332,6 +349,11 @@ class Calibrator:
                          {str(k): v for k, v in self.raw.items()})
         store.write_json(current, cal.to_json())
         summary = [f"{len(self.params)} keys calibrated"]
+        down, up = self.pedal_latency()
+        if down is not None and up is not None:
+            summary.append(f"the pedal goes down in {down * 1000:.0f} ms, up in {up * 1000:.0f} ms")
+        else:
+            summary.append("the pedal never echoed: its timing stays a guess")
         extra = [cal.velocity(k, 40, pedal=True) - cal.velocity(k, 40) for k in cal.keys]
         if extra:
             summary.append(f"with the pedal down, a soft note needs velocity "
@@ -459,6 +481,7 @@ class MidiRig:
             except queue.Empty:
                 continue
             if pedal and kind == "cc" and a == 64:
+                got.append((t, "pedal", b))       # ours: its echo times the pedal
                 continue
             if kind == "cc" or a != key:
                 raise Interrupted(f"{key_name(a)}" if kind != "cc" else "a pedal")
@@ -486,8 +509,9 @@ class MidiRig:
         self._settle()
         got: list = []
         if pedal:
+            tp = self.clock()
             self.out.cc(64, 127)
-            self._collect(key, self.clock() + 0.1, got, pedal=True)
+            self._collect(key, tp + 0.1, got, pedal=True)
         t0 = self.clock()
         self.out.note_on(key, vel)
         self._collect(key, t0 + hold, got, pedal)
@@ -495,15 +519,22 @@ class MidiRig:
         t1 = self.last_off = self.clock()
         self._collect(key, max(t1 + 0.35, t0 + 0.45), got, pedal)
         if pedal:
+            tu = self.clock()
             self.out.cc(64, 0)
-            self.last_off = self.clock()
-            self._collect(key, self.last_off + 0.15, got, pedal=True)
+            self.last_off = tu
+            self._collect(key, tu + 0.3, got, pedal=True)
+        s = Strike()
+        if pedal:
+            downs = [t for t, kind, b in got if kind == "pedal" and b >= 64]
+            ups = [t for t, kind, b in got if kind == "pedal" and b < 64 and t >= tu]
+            s.pedal_down = downs[0] - tp if downs else None
+            s.pedal_up = ups[0] - tu if ups else None
         ons = [(t, b) for t, kind, b in got if kind == "on"]
         if not ons:
-            return Strike()
+            return s
         offs = [t for t, kind, _ in got if kind == "off" and t >= ons[0][0]]
-        s = Strike(sensed=ons[0][1], l_on=ons[0][0] - t0,
-                   l_off=(offs[0] - t1) if offs and offs[0] >= t1 else None)
+        s.sensed, s.l_on = ons[0][1], ons[0][0] - t0
+        s.l_off = (offs[0] - t1) if offs and offs[0] >= t1 else None
         if self.mic and listen:
             self.sleep(max(0.0, t0 + 0.75 - self.clock()))       # let the audio arrive
             peak = self.mic.peak(t0, t0 + 0.6)

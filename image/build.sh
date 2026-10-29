@@ -5,6 +5,8 @@
 #
 #   sudo image/build.sh             -> image/work/pianopi.img
 #   sudo image/build.sh --write /dev/sdX   ... and write it to that card (asks first)
+#   sudo SEED=<pianod data dir> image/build.sh   ... starting with that dir's library mirror and
+#                                       calibration (an hour at the piano to measure again)
 #
 # Everything the Pi needs is installed here, in an arm64 chroot under qemu (qemu-user-static +
 # binfmt-support), so the card works on first boot with no keyboard and no screen:
@@ -163,6 +165,13 @@ in_pi update-initramfs -u -k all
 # The data partition's starting contents. The library mirror starts empty: the first
 # `piano sync` (or the badge's "Update the library") fills it from the server.
 install -d -m 755 "$MNT/var/lib/piano" "$MNT/var/lib/piano/midi-files" "$MNT/var/lib/piano/recordings"
+if [ -n "${SEED:-}" ]; then
+  say "seeding the data partition from $SEED"
+  [ -s "$SEED/library.json" ] && cp "$SEED/library.json" "$MNT/var/lib/piano/"
+  [ -d "$SEED/midi-files" ] && cp -r "$SEED/midi-files/." "$MNT/var/lib/piano/midi-files/"
+  for f in "$SEED"/calibration*.json; do [ -e "$f" ] && cp "$f" "$MNT/var/lib/piano/"; done
+  ls "$MNT/var/lib/piano"; du -sh "$MNT/var/lib/piano"
+fi
 install -d -m 700 "$MNT/var/lib/piano/nm"
 TSU=$(in_pi id -u systemd-timesync); TSG=$(in_pi id -g systemd-timesync)
 install -d -m 755 -o "$TSU" -g "$TSG" "$MNT/var/lib/piano/timesync"
