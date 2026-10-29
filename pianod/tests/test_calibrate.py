@@ -100,17 +100,36 @@ def test_preflight_failure_is_reported():
     assert c.phase == "failed" and "REALTIME" in c.message
 
 
-def test_cancel_during_the_delay():
+def test_cancel_during_the_countdown():
     c = run(FakePiano(cancel_in_delay=True), delay=600)
     assert c.phase == "cancelled" and not c.params
 
 
-def test_status_counts_down_then_reports_progress():
+def test_preflight_runs_before_the_countdown_and_again_after():
     t = [1000.0]
-    c = Calibrator(FakePiano(), keys=(60,), delay=600, clock=lambda: t[0])
-    assert c.status()["phase"] == "waiting" and c.status()["starts_in"] == 600
-    t[0] += 90
-    assert c.status()["starts_in"] == 510
+    seen = []
+
+    class Piano(FakePiano):
+        def preflight(self):
+            seen.append(("preflight", c.phase))
+            return super().preflight()
+
+        def sleep(self, seconds):
+            seen.append(("countdown", c.status()["starts_in"]))
+            t[0] += 90
+            seen.append(("later", c.status()["starts_in"]))
+
+    c = Calibrator(Piano(), keys=(60,), delay=600, clock=lambda: t[0])
+    assert c.status()["phase"] == "preflight"
+    c.run()
+    assert seen == [("preflight", "preflight"), ("countdown", 600), ("later", 510),
+                    ("preflight", "preflight")]
+    assert c.phase == "done"
+
+
+def test_a_failed_preflight_never_starts_the_countdown():
+    c = run(FakePiano(fail_preflight="no reply from the key sensors"), delay=600)
+    assert c.phase == "failed" and c.starts_at is None
 
 
 def test_key_params_flags_a_silent_key_and_keeps_defaults():
@@ -150,3 +169,19 @@ def test_the_velocity_fit_ignores_the_flat_top():
     p, _ = key_params({v: Strike(sensed=s, l_on=0.1) for v, s in sensed.items()}, {}, 0.03)
     assert abs(p["sv"] * 91 + p["mv"] - 100) < 4
     assert abs(p["sv"] * 41 + p["mv"] - 30) < 4
+
+
+def test_probe_mic_reports_why_not(monkeypatch):
+    from pianod import calibrate
+    monkeypatch.setattr(calibrate, "find_device", lambda: None)
+    assert calibrate.probe_mic() == {"ok": False, "why": "no mic plugged in"}
+
+    class Done:
+        def __init__(self, data):
+            self.stdout = data
+    monkeypatch.setattr(calibrate, "find_device", lambda: ("hw:9,0", "USB mic"))
+    monkeypatch.setattr(calibrate.subprocess, "run", lambda *a, **k: Done(b"\0" * 16000))
+    assert "muted" in calibrate.probe_mic()["why"]
+    monkeypatch.setattr(calibrate.subprocess, "run", lambda *a, **k: Done(b"\x10\x00" * 8000))
+    r = calibrate.probe_mic()
+    assert r["ok"] and r["name"] == "USB mic"

@@ -70,6 +70,9 @@ def show(st: dict) -> None:
         print("Idle")
     print(f"Volume  {st['volume']}/11   MIDI out {'ok' if st['midi_out'] else 'MISSING'}"
           f"   in {'ok' if st['midi_in'] else 'MISSING'}   {st['works']} works")
+    mic = st.get("mic")
+    if mic:
+        print(f"Mic     {mic['name'] if mic.get('ok') else mic.get('why')}")
 
 
 def main(argv=None) -> int:

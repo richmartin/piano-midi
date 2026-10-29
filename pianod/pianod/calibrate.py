@@ -189,7 +189,8 @@ class Calibrator:
         self.keys = list(keys)
         self.delay = delay
         self.clock = clock
-        self.phase = "waiting" if delay else "preflight"
+        self.phase = "preflight"
+        self.starts_at: float | None = None
         self.message = ""
         self.key: int | None = None
         self.done = 0
@@ -209,8 +210,8 @@ class Calibrator:
              "key": key_name(self.key) if self.key is not None else None,
              "message": self.message,
              "flags": sum(len(f) for f in self.flags.values())}
-        if self.phase == "waiting":
-            s["starts_in"] = max(0, round(self.started + self.delay - self.clock()))
+        if self.phase == "waiting" and self.starts_at is not None:
+            s["starts_in"] = max(0, round(self.starts_at - self.clock()))
         if self.measuring_since is not None and self.done and not self.finished:
             per_key = (self.clock() - self.measuring_since) / self.done
             s["eta"] = round(per_key * (len(self.keys) - self.done))
@@ -218,10 +219,16 @@ class Calibrator:
 
     def run(self) -> None:
         try:
+            # Preflight first, even with a delay: a wrong wagon setting or a deaf mic is found
+            # while whoever started it is still in the room, not after they've gone out.
+            info = self.rig.preflight()
             if self.delay:
+                self.phase = "waiting"
+                self.starts_at = self.clock() + self.delay
                 self.rig.sleep(self.delay)
-            self.phase = "preflight"
-            self.info = {**self.rig.preflight(), "started": time.strftime("%Y-%m-%d %H:%M")}
+                self.phase = "preflight"
+                info = self.rig.preflight()        # again: things change in ten minutes
+            self.info = {**info, "started": time.strftime("%Y-%m-%d %H:%M")}
             self.phase = "measuring"
             self.measuring_since = self.clock()
             for k in self.keys:
@@ -299,19 +306,8 @@ class Mic:
 
     @classmethod
     def find(cls) -> "Mic | None":
-        device = os.environ.get("PIANO_MIC", "")
-        name = device
-        if not device:
-            try:
-                listing = subprocess.run(["arecord", "-l"], capture_output=True, text=True,
-                                         timeout=5).stdout
-            except (OSError, subprocess.SubprocessError):
-                return None
-            m = re.search(r"^card (\d+): \S+ \[([^\]]*)\], device (\d+)", listing, re.M)
-            if not m:
-                return None
-            device, name = f"plughw:{m.group(1)},{m.group(3)}", m.group(2)
-        return cls(device, name)
+        found = find_device()
+        return cls(*found) if found else None
 
     def _read(self) -> None:
         n = self.CHUNK * 2
@@ -336,6 +332,45 @@ class Mic:
 
     def close(self) -> None:
         self.proc.terminate()
+
+
+def find_device() -> tuple[str, str] | None:
+    """(ALSA device, name) of PIANO_MIC, or else the first capture device; None if none."""
+    device = os.environ.get("PIANO_MIC", "")
+    if device:
+        return device, device
+    try:
+        listing = subprocess.run(["arecord", "-l"], capture_output=True, text=True,
+                                 timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"^card (\d+): \S+ \[([^\]]*)\], device (\d+)", listing, re.M)
+    if not m:
+        return None
+    return f"plughw:{m.group(1)},{m.group(3)}", m.group(2)
+
+
+def probe_mic() -> dict:
+    """Is there a mic, and does it deliver sound? Half a second of it, for the panel's sake:
+    {"ok": True, "name", "dbfs"} or {"ok": False, "why"}. Hearing the piano is preflight's job."""
+    found = find_device()
+    if not found:
+        return {"ok": False, "why": "no mic plugged in"}
+    device, name = found
+    try:
+        b = subprocess.run(["arecord", "-q", "-D", device, "-f", "S16_LE", "-r", "16000",
+                            "-c", "1", "-t", "raw", "-s", "8000"],
+                           capture_output=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "name": name, "why": f"{name}: {e}"}
+    if len(b) < 2000:
+        return {"ok": False, "name": name, "why": f"{name} gives no sound"}
+    a = array("h")
+    a.frombytes(b[: len(b) // 2 * 2])
+    if not any(a):
+        return {"ok": False, "name": name, "why": f"{name} is silent (muted?)"}
+    ms = sum(x * x for x in a) / len(a)
+    return {"ok": True, "name": name, "dbfs": round(10 * math.log10(ms / 32768 ** 2), 1)}
 
 
 class MidiRig:

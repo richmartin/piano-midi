@@ -161,9 +161,14 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
   with a mic in), fixed in one place under the lid, so calibrations are comparable over time. It
   uses the first capture device it finds, or `PIANO_MIC`, and records the mic's name in the
   calibration, so a change of mic isn't mistaken for every key drifting.
+- **No mic, no Calibrate.** pianod takes half a second from the mic every 30 s and reports it in
+  its state (`mic`: found and delivering sound, or why not); the badge greys the menu item out
+  and says why, and pianod refuses `calibrate` without one.
 - **Preflight**: a test note must come back from the key sensors (proves wagon MIDI on,
   MIDIOUT=KBD OUT, MIDIIN=REALTIME from the ~66 ms echo — DELAY IN shows as ~515 ms), and the
   mic must hear it above the room's noise floor. Fails with a message saying which setting.
+  It runs **as soon as a calibration is asked for, before any countdown**, so a problem shows
+  while whoever started it is still in the room — and again when the countdown ends.
 - **Per key**, one note at a time, waiting for the damper and the room to go quiet between notes
   (the earlier laptop run failed exactly here: notes masked by the previous one ringing):
   velocity → mic loudness and sensor velocity (~8 points), `l_on` per velocity, `l_off`, `md`

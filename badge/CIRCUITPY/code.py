@@ -217,8 +217,9 @@ class GoHome(Exception):
     """Leave every menu at once: SELECT from anywhere."""
 
 
-def choose(title, options, start=0, hint_text=None):
-    """A scrolling list: up/down move, right chooses, left goes back (None)."""
+def choose(title, options, start=0, hint_text=None, dim=()):
+    """A scrolling list: up/down move, right chooses, left goes back (None). Rows in `dim` are
+    greyed out (still choosable: the caller says why they can't be done)."""
     sel, top = min(start, len(options) - 1), 0
     while True:
         g = screen()
@@ -229,7 +230,8 @@ def choose(title, options, start=0, hint_text=None):
             y = 18 + (i - top) * 13
             if i == sel:
                 rect(g, 0, y - 1, W, 13, 0x203050)
-            text(g, str(options[i])[:26], 6, y, WHITE if i == sel else GREY)
+            color = (GREY if i == sel else DIM) if i in dim else (WHITE if i == sel else GREY)
+            text(g, str(options[i])[:26], 6, y, color)
         hint(g, hint_text or t("hint_choose"))
         k = wait_key()
         if k == SELECT:
@@ -392,7 +394,13 @@ def menu():
                ("m_info", info))
     start = 0
     while True:
-        i = choose(t("menu"), [t(key) for key, _fn in entries], start)
+        # Calibrate is greyed out until pianod has found a mic that works: a calibration set
+        # going for later must not discover then that it can't hear.
+        mic_ok = ((link.state or {}).get("mic") or {}).get("ok")
+        labels = [t("m_calibrate_nomic") if key == "m_calibrate" and not mic_ok else t(key)
+                  for key, _fn in entries]
+        dim = () if mic_ok else tuple(n for n, (key, _fn) in enumerate(entries) if key == "m_calibrate")
+        i = choose(t("menu"), labels, start, dim=dim)
         if i is None:
             return
         start = i
@@ -475,6 +483,8 @@ def info():
     lines = [t("i_link", s=t("i_ok") if link.connected() else t("i_lost")),
              t("i_midi", s=t("i_ok") if st.get("midi_out") else t("i_lost")),
              t("i_works", n=st.get("works", "-")),
+             t("i_mic", s=(st.get("mic") or {}).get("name") if (st.get("mic") or {}).get("ok")
+               else t("i_none")),
              t("i_mode", s=st.get("mode", "-"))]
     choose(t("info_title"), lines, 0, t("hint_back"))
 
@@ -597,6 +607,10 @@ def calibrating_now(st):
 
 def calibrate():
     """Measure every key — up to an hour, so it can start later and run with nobody home."""
+    mic = (link.state or {}).get("mic") or {}
+    if not mic.get("ok"):
+        message(t("cal_no_mic"), mic.get("why", ""), ORANGE, 3)
+        return
     i = choose(t("cal_when"), [t("cal_now") if n == 0 else t("cal_in", n=n) for n in CAL_DELAYS])
     if i is None:
         return

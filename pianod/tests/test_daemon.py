@@ -152,9 +152,17 @@ def test_panic_stops_and_silences(d):
     assert ("cc", 123, 0) in d.out.sent
 
 
+def test_calibrate_needs_a_working_mic(d):
+    d.mic = {"ok": False, "why": "no mic plugged in"}
+    r = d.handle({"cmd": "calibrate", "delay": 10})
+    assert not r["ok"] and "no mic plugged in" in r["error"]
+    assert d.calib is None
+
+
 def test_calibrate_blocks_playback_and_fails_cleanly_with_no_piano(d, monkeypatch):
     from pianod import calibrate
     monkeypatch.setattr(calibrate.Mic, "find", classmethod(lambda cls: None))
+    d.mic = {"ok": True, "name": "test"}
     ok(d, "calibrate")
     assert ok(d, "status")["state"]["calib"]["phase"] in ("preflight", "measuring")
     r = d.handle({"cmd": "play", "slug": "bach-js"})
@@ -166,12 +174,12 @@ def test_calibrate_blocks_playback_and_fails_cleanly_with_no_piano(d, monkeypatc
     ok(d, "play", slug="bach-js")                  # free again
 
 
-def test_calibrate_with_a_delay_can_be_cancelled(d, monkeypatch):
+def test_a_delayed_calibration_fails_before_the_countdown_not_after(d, monkeypatch):
+    """Preflight runs at once: nobody goes out for ten minutes to come back to a failure."""
     from pianod import calibrate
     monkeypatch.setattr(calibrate.Mic, "find", classmethod(lambda cls: None))
+    d.mic = {"ok": True, "name": "test"}
     ok(d, "calibrate", delay=10)
-    assert ok(d, "status")["state"]["calib"]["starts_in"] == 600
-    ok(d, "calibrate_cancel")
-    assert wait_for(lambda: d.calib.finished)
-    assert d.calib.phase == "cancelled"
+    assert wait_for(lambda: d.calib.finished, timeout=5)
+    assert d.calib.phase == "failed" and d.calib.starts_at is None
     assert ok(d, "calibrate_summary")["lines"] == []

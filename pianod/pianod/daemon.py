@@ -34,6 +34,7 @@ MIDI_OUT = os.environ.get("PIANO_MIDI_OUT", "")      # substring of the port nam
 MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
 ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
 POLL = 0.005                  # looper tick
+MIC_CHECK_EVERY = 30.0        # seconds between looks for a working mic
 PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
 MODES = ("library", "performance")
 
@@ -73,6 +74,7 @@ class Pianod:
         self.last_input = 0.0                # monotonic: someone played the keys
         self.calib: calibrate.Calibrator | None = None
         self.calib_summary: list[str] = []   # the last calibration's findings
+        self.mic: dict = {"ok": False, "why": "not checked yet"}   # calibrate.probe_mic()
         st = store.read_json(f"{DATA}/state.json", {})
         if 1 <= st.get("volume", 0) <= 11:
             self.player.volume = st["volume"]
@@ -101,6 +103,7 @@ class Pianod:
                 "works": len(self.lib.all_works()),
                 "perf": self.looper.status(),
                 "calib": self.calib.status() if self.calib else None,
+                "mic": self.mic,
             }
 
     def _push(self):
@@ -241,6 +244,9 @@ class Pianod:
             if cmd == "calibrate":
                 # Optional delay in minutes, to get out of the house first.
                 delay = max(0.0, float(req.get("delay", 0))) * 60
+                if not self.mic.get("ok"):
+                    raise ValueError(f"no working mic ({self.mic.get('why')}): calibration "
+                                     "needs one to hear the piano")
                 self.player.stop()
                 self.looper.clear()
                 rig = calibrate.MidiRig(self.out, calibrate.Mic.find())
@@ -318,6 +324,18 @@ class Pianod:
                 LOG.info("calibration: %s", line)
         self._push()
 
+    def _watch_mic(self):
+        """Keep self.mic current, so the panel can offer Calibrate only when it can work."""
+        while True:
+            if not self._calibrating():            # mid-run, the calibration has the mic
+                mic = calibrate.probe_mic()
+                same = {**mic, "dbfs": None} == {**self.mic, "dbfs": None}   # level always moves
+                self.mic = mic
+                if not same:
+                    self.mic = mic
+                    self._push()
+            time.sleep(MIC_CHECK_EVERY)
+
     def _require_library_mode(self):
         if self.mode != "library":
             raise ValueError("in performance mode (switch back to the library first)")
@@ -360,6 +378,7 @@ class Pianod:
         threading.Thread(target=serve_socket, args=(self,), daemon=True, name="socket").start()
         threading.Thread(target=serve_panel, args=(self,), daemon=True, name="panel").start()
         threading.Thread(target=self._midi_in_loop, daemon=True, name="midi-in").start()
+        threading.Thread(target=self._watch_mic, daemon=True, name="mic-check").start()
         notify("READY=1")
         LOG.info("pianod up: %d works, MIDI out %s", len(self.lib.all_works()),
                  "connected" if self.out.connected else "NOT connected")

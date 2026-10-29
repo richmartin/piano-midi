@@ -22,6 +22,7 @@ T = {
     "m_shuffle": "Shuffle everything",
     "m_sync": "Update the library",
     "m_calibrate": "Calibrate the piano",
+    "m_calibrate_nomic": "Calibrate (needs a mic)",
     "m_info": "About this panel",
     "hint_choose": "UP/DOWN  > choose  < back",
     "hint_back": "< back",
@@ -58,6 +59,7 @@ T = {
 
     # calibration
     "cal_when": "Calibrate: start when?",
+    "cal_no_mic": "Plug in a mic",
     "cal_now": "Now",
     "cal_in": "In {n} minutes",
     "cal_title": "CALIBRATING",
@@ -89,6 +91,8 @@ T = {
     "i_midi": "Piano MIDI: {s}",
     "i_works": "Library: {n} pieces",
     "i_mode": "Mode: {s}",
+    "i_mic": "Mic: {s}",
+    "i_none": "none working",
 
     # shared
     "ok": "Done",
