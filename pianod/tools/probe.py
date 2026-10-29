@@ -134,7 +134,8 @@ def main():
     print("\nFirst, the cable check: one note, middle C, right now.")
     note(outport, MIDDLE_C, 70)
     if input("did the piano play it? [y/n] ").strip().lower() != "y":
-        sys.exit("fix that first: piano on, MIDI IN plug, interface light.")
+        sys.exit("fix that first: piano on, wagon MIDI button lit, wagon-to-piano cable seated\n"
+                 "(and MIDIOUT=KBD OUT via R for the echo test - see docs/design.md).")
     test_echo_and_latency(outport, inport)
     test_dynamics(outport)
     test_keys(inport)

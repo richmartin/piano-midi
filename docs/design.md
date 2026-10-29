@@ -63,13 +63,28 @@ record → close loop → overdub), **B** = stop (in Performance: end take / sto
 **SELECT** = menu, d-pad = navigate (home: volume and prev/next). Layout maths live in
 `layout.py`, pure Python, tested on the laptop — including that every hint fits in 26 characters.
 
-## Open hardware questions (answer at the piano before trusting the defaults)
+## The piano: Yamaha Disklavier "Wagon Grand", control wagon DKW10
+
+Wagon settings pianod needs (both on the wagon's front panel):
+
+- **MIDI** button lit (red). Off, the wagon ignores MIDI IN and the piano plays nothing.
+- **MIDIOUT=KBD OUT**, toggled by the **R** (part cancel) button while in MIDI mode. The other
+  setting, DELAY OUT, sends MIDI IN back out after the wagon's playback delay — it looks like an
+  echo but carries none of the keys, so recording silently captures nothing.
+
+The REC button is for floppies and does nothing in MIDI mode. The wagon-to-piano cable has worked
+loose once: if MIDI is lit and the piano stays silent, reseat it.
+
+## Hardware questions (answer at the piano before trusting the defaults)
 
 Run a laptop with a 20-line mido probe against the real piano:
 
-1. **Echo** — does solenoid playback appear on MIDI OUT? Sets `PIANO_ECHO_MS` (0 if it doesn't).
-2. **Latency** — MIDI-in-to-hammer delay; send a note, time its echo. Sets `PIANO_LATENCY_MS`,
-   which the looper uses to play layers early so they land with live playing.
+1. **Echo** — does solenoid playback appear on MIDI OUT? **Yes** (2026-10-29, KBD OUT): every
+   note and its note-off, velocity as the sensors measured it (sent 70, reported 72–74).
+   `PIANO_ECHO_MS=700`.
+2. **Latency** — MIDI-in-to-hammer delay; send a note, time its echo. **513–520 ms**, steady: the
+   wagon delays playback by about half a second. `PIANO_LATENCY_MS=515`, which the looper uses
+   to play layers early so they land with live playing. Trust ears over this if layers drift.
 3. **Dynamics floor** — the minimum solenoid velocity. May want a velocity map later.
 4. **Boot time** — power-on to ready, for the smart-plug warm-up delay (server side, later).
 

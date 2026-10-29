@@ -14,6 +14,10 @@ RestartSec=3
 # pianod pings systemd every second; if it hangs, systemd kills and restarts it.
 WatchdogSec=30
 Environment=PYTHONUNBUFFERED=1
+# Measured on the DKW10 (docs/design.md): the wagon plays incoming MIDI ~515 ms late and its
+# key sensors report that playback on MIDI OUT, so the echo gate has to wait longer than that.
+Environment=PIANO_LATENCY_MS=515
+Environment=PIANO_ECHO_MS=700
 
 [Install]
 WantedBy=multi-user.target
