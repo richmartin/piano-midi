@@ -105,6 +105,77 @@ Run a laptop with a 20-line mido probe against the real piano:
    Your own playing (keys test): 30–86, sustain pedal reported on MIDI OUT.
 4. **Boot time** — power-on to ready, for the smart-plug warm-up delay (server side, later).
 
+## What goes wrong between a file and the strings (measured 2026-10-29)
+
+Satie's Gnossienne No. 1 through pianod at volume 8, every note matched against the key sensors:
+126 of 980 note-ons never sounded. Not a black-key problem (a sweep of all 88 keys at velocities
+12–30, notes held 250 ms, sounded every one) but a **timing** one:
+
+- **Short notes are cut off before the hammer lands.** A soft note takes ~145 ms from MIDI to
+  strike (velocity 15; ~118 ms at 30, ~80 ms at 60). A note-off before then pulls the solenoid back
+  and the note never sounds: held under 80 ms, 100% lost at velocity 15. The Gnossienne's grace
+  notes are exactly this. Shortest hold that sounds, per key, single trial each:
+
+  | velocity | min hold | strike |
+  |---|---|---|
+  | 15 | 100 ms (59 keys), 130 ms (28), 60 ms (1) | 124–184 ms |
+  | 30 | 80 ms (73 keys), 60–100 ms (the rest) | 104–143 ms |
+  | 60 | 40 ms (all 88; 20 ms never sounds) | 68–102 ms |
+
+  Velocity dominates; the key barely matters. Min hold ≈ strike time − 40–50 ms (the hammer
+  coasts once thrown).
+- **Fast re-strikes of the same key** drop too: re-struck alone within 150 ms of its release, 51%.
+- **The velocity map sank a quiet file onto the floor**: 74% of its notes went out at 15.
+  The library comes from many sources (converted piano rolls, modern recordings), so its
+  velocities don't mean any one thing — they need fitting per file, not one global map.
+- **Soft notes land late.** Strike time spans ~70–185 ms with velocity, so uncompensated, the soft
+  notes of a chord land up to ~75 ms after the loud ones.
+
+## The playback model
+
+Every note goes through two independent stages before it reaches the piano:
+
+1. **What the music wants** — per file. Fit the file's own velocity spread onto the piano's usable
+   range, then apply volume. Gives `iv`, the loudness wanted, in the piano's own sensor units.
+   Performance takes skip the fit: they were recorded in those units.
+2. **What this piano needs to produce it** — per key `k`, from the calibration:
+   - **Velocity**: `ov = clamp(iv · sv(k) + mv(k), 1, 127)` — linear is a fair fit above the
+     floor (a measured curve can replace it). Calibrated by loudness on the mic, not the sensors
+     alone: a 40-year-old sensor can be off while its hammer is fine.
+   - **Latency**: send the note-on `l_on(ov, k)` early so it strikes on time, and the note-off
+     `l_off(k)` early (the dampers: ~45–50 ms). Pedals get their own `l(cc)`.
+   - **Duration**: the hold actually sent is `id + l_on − l_off`, which already lengthens soft
+     notes; then enforce `max(md(ov, k), …)` on it.
+   - **Re-strike**: a key needs `mr(k)` after its note-off before it can sound again; if the next
+     note-on comes sooner, shorten the previous note rather than lose the new one.
+
+Because events now leave early by different amounts, the player looks ahead by the largest
+latency (~200 ms) and sends in *send-time* order, not sound-time order. The calibration is one
+file, `calibration.json` on the data partition; pianod loads it at start and after every
+calibration. Without one, it falls back to the measured defaults above.
+
+## Calibrate
+
+A full calibration cycle run by the Pi itself — started from the badge (SELECT → Calibrate) or
+`piano calibrate`, with an **optional delayed start** (default 10 minutes, counting down on the
+badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to be left alone.
+
+- **Needs a microphone on the Pi** (the Pi 4 has no audio input: a USB mic), fixed in one place
+  under the lid, so calibrations are comparable over time.
+- **Preflight**: a test note must come back from the key sensors (proves wagon MIDI on,
+  MIDIOUT=KBD OUT, MIDIIN=REALTIME from the ~66 ms echo — DELAY IN shows as ~515 ms), and the
+  mic must hear it above the room's noise floor. Fails with a message saying which setting.
+- **Per key**, one note at a time, waiting for the damper and the room to go quiet between notes
+  (the earlier laptop run failed exactly here: notes masked by the previous one ringing):
+  velocity → mic loudness and sensor velocity (~8 points), `l_on` per velocity, `l_off`, `md`
+  by searching the hold at a few velocities, `mr` by searching the re-strike gap.
+- **Interruptions**: an unexpected key press (someone playing) or a loud room pauses it; it waits
+  for quiet and carries on. Pianod refuses playback and Performance mode while calibrating;
+  only cancel is accepted. Progress (key, stage, time left) is pushed like any other state.
+- **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
+  summary on the badge — including keys that changed noticeably since last time, which is how a
+  failing solenoid or sensor gets noticed.
+
 ## Later (server side, not in this repo yet)
 
 - murdoch app at piano.fam-mart.in: web remote speaking the same protocol (the Pi dials out),
