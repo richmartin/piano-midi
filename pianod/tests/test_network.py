@@ -63,7 +63,15 @@ def test_an_open_network_gets_no_second_try(monkeypatch):
     nm = FakeNM(join_ok=False)
     monkeypatch.setattr(network, "run", nm)
     assert network.join("Cafe", None)[0] is False
-    assert len(nm.calls) == 1
+    assert nm.calls == [["nmcli", "radio", "wifi", "on"], ["nmcli", "device", "wifi", "connect", "Cafe"]]
+
+
+def test_scan_and_join_switch_the_radio_on_first(monkeypatch):
+    for call in (network.scan, lambda: network.join("Excession", "hollywood")):
+        nm = FakeNM()
+        monkeypatch.setattr(network, "run", nm)
+        call()
+        assert nm.calls[0] == ["nmcli", "radio", "wifi", "on"]
 
 
 def test_log_is_tidied_for_a_small_screen(monkeypatch):

@@ -40,6 +40,13 @@ install -m 644 "$REPO/image/files/pianod.service" "$MNT/root/etc/systemd/system/
   > "$MNT/root/etc/pianopi-build.new" && mv "$MNT/root/etc/pianopi-build.new" "$MNT/root/etc/pianopi-build"
 echo "now: $(tail -1 "$MNT/root/etc/pianopi-build")"
 
+# NetworkManager's own WiFi switch, which images before this shipped off (see build.sh).
+NMSTATE="$MNT/root/var/lib/NetworkManager/NetworkManager.state"
+if [ -f "$NMSTATE" ] && ! grep -q '^WirelessEnabled=true' "$NMSTATE"; then
+  sed -i 's/^WirelessEnabled=.*/WirelessEnabled=true/' "$NMSTATE"
+  echo "NetworkManager's WiFi switched on"
+fi
+
 # Saved networks made before PMF was turned off for them (see build.sh).
 for f in "$MNT/data/nm"/*.nmconnection; do
   [ -e "$f" ] || continue

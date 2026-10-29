@@ -37,8 +37,15 @@ def status() -> dict:
     return info
 
 
+def radio_on() -> None:
+    """NetworkManager's own WiFi switch: off, the WiFi is "unavailable" and finds nothing.
+    Raspberry Pi OS ships it off until a country is set."""
+    run(["nmcli", "radio", "wifi", "on"])
+
+
 def scan() -> list[dict]:
     """The networks in range, strongest first: {"ssid", "signal", "secure"}."""
+    radio_on()
     rc, out = run(["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list",
                    "--rescan", "yes"], timeout=30)
     nets = {}
@@ -57,6 +64,7 @@ def join(ssid: str, psk: str | None) -> tuple[bool, str]:
     """Join and remember (on the data partition) a network. If that fails on a secured one, try
     once more with management-frame protection off: the Pi 4's brcmfmac often can't join
     WPA2/WPA3 transition networks (phone hotspots) with it on."""
+    radio_on()
     rc, out = run(["nmcli", "device", "wifi", "connect", ssid] + (["password", psk] if psk else []),
                   timeout=45)
     if rc == 0 or not psk:

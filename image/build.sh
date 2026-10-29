@@ -211,6 +211,12 @@ printf '[device]\nwifi.scan-rand-mac-address=no\n' > "$MNT/etc/NetworkManager/co
 # survive a read-only root, so unblock at every boot.
 install -m 644 "$F/piano-rfkill.service" "$MNT/etc/systemd/system/piano-rfkill.service"
 in_pi systemctl enable piano-rfkill.service
+# NetworkManager has its own WiFi switch, saved in its state file, and Raspberry Pi OS ships it
+# off until a country is set. On a read-only root that file comes back from the image at every
+# boot, so it has to be on here: off, the WiFi shows as "unavailable" and scans find nothing.
+sed -i 's/^WirelessEnabled=.*/WirelessEnabled=true/' "$MNT/var/lib/NetworkManager/NetworkManager.state"
+grep -q '^WirelessEnabled=true' "$MNT/var/lib/NetworkManager/NetworkManager.state" \
+  || printf '[main]\nWirelessEnabled=true\n' >> "$MNT/var/lib/NetworkManager/NetworkManager.state"
 sed -i 's/ cfg80211.ieee80211_regdom=[^ ]*//; s/$/ cfg80211.ieee80211_regdom=CH/' "$MNT/boot/firmware/cmdline.txt"
 
 # --- 5. pianod ---------------------------------------------------------------------------------
@@ -229,6 +235,7 @@ in_pi systemctl enable pianod.service
 say "checks"
 grep -o 'overlayroot=[^ ]*' "$MNT/boot/firmware/cmdline.txt"
 in_pi python3 -c "import mido, rtmidi, serial; print('python modules ok')"
+grep -q '^WirelessEnabled=true' "$MNT/var/lib/NetworkManager/NetworkManager.state" || die "NetworkManager's WiFi is off"
 for u in pianod piano-rfkill ssh systemd-timesyncd NetworkManager; do
   [ "$(in_pi systemctl is-enabled $u 2>/dev/null)" = enabled ] || die "$u isn't enabled"
 done
