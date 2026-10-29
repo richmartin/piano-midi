@@ -28,7 +28,9 @@ MIDDLE_C = 60
 
 
 def pick_port(names, what):
-    names = [n for n in names if "through" not in n.lower() and "thru" not in n.lower()]
+    # rtmidi's own virtual port shows up once the output is open; it's never the piano
+    names = [n for n in names
+             if not any(s in n.lower() for s in ("through", "thru", "rtmidi"))]
     if not names:
         sys.exit(f"no MIDI {what} port found - is the interface plugged in?")
     if len(names) == 1:
