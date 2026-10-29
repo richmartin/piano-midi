@@ -34,6 +34,7 @@ MIDI_OUT = os.environ.get("PIANO_MIDI_OUT", "")      # substring of the port nam
 MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
 LATENCY = float(os.environ.get("PIANO_LATENCY_MS", "0")) / 1000     # solenoid delay, measured
 ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
+VELOCITY_MAP = os.environ.get("PIANO_VELOCITY_MAP", "1") != "0"     # invert the measured curve
 POLL = 0.005                  # looper tick
 PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
 MODES = ("library", "performance")
@@ -59,7 +60,8 @@ class Pianod:
         os.makedirs(DATA, exist_ok=True)
         self.lib = library.Library(DATA)
         if out is None:
-            out, midi_in = midiio.open_ports(MIDI_OUT, MIDI_IN)
+            vmap = midiio.VelocityMap() if VELOCITY_MAP else None
+            out, midi_in = midiio.open_ports(MIDI_OUT, MIDI_IN, vmap)
         self.out = out
         self.midi_in = midi_in
         self.gate = midiio.EchoGate(window=ECHO_MS / 1000)
