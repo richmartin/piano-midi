@@ -73,8 +73,14 @@ def test_echo_and_latency(outport, inport):
     drain(inport)
     delays = []
     for i, pitch in enumerate((60, 64, 67, 72, 55)):
-        sent = note(outport, pitch, 70)
-        for msg, arrived in listen(inport, 1.2):
+        # Listen while the note is held: polling only after note() returns would stamp any echo
+        # quicker than the hold at the hold time.
+        outport.send(mido.Message("note_on", note=pitch, velocity=70))
+        sent = time.monotonic()
+        heard = listen(inport, 0.4)
+        outport.send(mido.Message("note_off", note=pitch, velocity=0))
+        heard += listen(inport, 0.8)
+        for msg, arrived in heard:
             if msg.type == "note_on" and msg.velocity > 0 and msg.note == pitch:
                 delays.append(arrived - sent)
                 break
