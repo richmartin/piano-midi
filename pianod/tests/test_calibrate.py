@@ -142,3 +142,11 @@ def test_compare_is_quiet_when_nothing_moved():
 def test_loudness_suspects_needs_neighbours():
     raw = {60: {"curve": {30: {"sensed": 40, "db": 20}, 60: {"sensed": 60, "db": 30}}}}
     assert loudness_suspects(raw) == {}
+
+
+def test_the_velocity_fit_ignores_the_flat_top():
+    # Measured on C4: 127 plays no louder than 100.
+    sensed = {12: 27, 20: 32, 30: 41, 45: 51, 60: 61, 80: 77, 100: 91, 127: 88}
+    p, _ = key_params({v: Strike(sensed=s, l_on=0.1) for v, s in sensed.items()}, {}, 0.03)
+    assert abs(p["sv"] * 91 + p["mv"] - 100) < 4
+    assert abs(p["sv"] * 41 + p["mv"] - 30) < 4

@@ -105,8 +105,12 @@ def fit_line(points):
 def key_params(curve: dict, md: dict, mr: float | None) -> tuple[dict, list[str]]:
     """One key's measurements -> its calibration parameters, and anything worth flagging."""
     p, flags = {}, []
-    # Velocity: send = sv * sensed + mv, fitted above the floor where the sensor still moves.
-    pts = [(s.sensed, v) for v, s in sorted(curve.items()) if s.sensed and v >= 20]
+    # Velocity: send = sv * sensed + mv, fitted where the sensor still moves — above the floor,
+    # and below the top (on the DKW10, 127 plays no louder than 100).
+    pts = []
+    for v, s in sorted(curve.items()):
+        if s.sensed and v >= 20 and (not pts or s.sensed > pts[-1][0]):
+            pts.append((s.sensed, v))
     line = fit_line(pts)
     if line and line[0] > 0:
         p["sv"], p["mv"] = round(line[0], 4), round(line[1], 2)

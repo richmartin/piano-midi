@@ -171,6 +171,11 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
 - **Interruptions**: an unexpected key press (someone playing) or a loud room pauses it; it waits
   for quiet and carries on. Pianod refuses playback and Performance mode while calibrating;
   only cancel is accepted. Progress (key, stage, time left) is pushed like any other state.
+- **First live run** (4 keys, laptop, 2026-10-29): ~21 s a key, so ~32 minutes for all 88.
+  Strike 145 ms at velocity 12 down to 50 ms at 100; min hold 115–130 / 93 / 48 ms at 15 / 30
+  / 60; re-strike gap only 40–45 ms. **Velocity saturates at 100**: 127 plays no louder, so the
+  velocity fit ignores the flat top. On a laptop the first capture device may be an empty
+  headset socket — `PIANO_MIC=default` there; preflight catches it.
 - **Results**: written atomically as a new `calibration.json`, the previous one kept, and a
   summary on the badge — including keys that changed noticeably since last time, which is how a
   failing solenoid or sensor gets noticed.
