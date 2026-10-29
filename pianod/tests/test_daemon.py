@@ -66,6 +66,21 @@ def test_browse(d):
     assert not r["ok"]
 
 
+def test_long_lists_come_in_pages_the_badge_can_read():
+    from pianod.daemon import PAGE_BYTES, page
+    items = [{"id": f"file-id-{i:06}", "title": "A rather long title, Op. %d" % i} for i in range(300)]
+    got, offset, pages = [], 0, 0
+    while offset is not None:
+        r = page({"offset": offset}, "works", items)
+        assert len(json.dumps(r)) < 4096 and len(json.dumps(r)) < PAGE_BYTES + 100
+        got += r["works"]
+        offset = r["next"]
+        pages += 1
+    assert got == items and pages > 5
+    assert page({}, "works", items) == {"works": items}          # the CLI: everything at once
+    assert page({"offset": 0}, "works", []) == {"works": [], "next": None}
+
+
 def test_play_composer_runs_the_queue_to_the_end(d):
     ok(d, "play", slug="bach-js")
     assert wait_for(lambda: not d.player.playing and d.index == 1)

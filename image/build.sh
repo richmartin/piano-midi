@@ -192,6 +192,9 @@ ssid=$ssid
 [wifi-security]
 key-mgmt=wpa-psk
 psk=$psk
+# Management-frame protection off: the Pi 4's brcmfmac often fails to join WPA2/WPA3
+# transition networks (phone hotspots) when NetworkManager offers it.
+pmf=1
 
 [ipv4]
 method=auto

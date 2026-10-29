@@ -30,6 +30,24 @@ DATA = os.environ.get("PIANO_DATA", "/var/lib/piano")
 SOCK = os.environ.get("PIANO_SOCK", "/run/piano/pianod.sock")
 SERIAL_GLOB = os.environ.get("PIANO_SERIAL", "/dev/serial/by-id/*Adafruit*-if02")
 SERVER_URL = os.environ.get("PIANO_SERVER", "https://home.fam-mart.in")
+PAGE_BYTES = 3000              # the badge drops any line over 4 KB: lists go in pages under it
+
+
+def page(req: dict, key: str, items: list) -> dict:
+    """All the items, or with "offset" in the request, the page from there that fits in
+    PAGE_BYTES, and where the next one starts (None: that was the last)."""
+    if "offset" not in req:
+        return {key: items}
+    start = int(req["offset"])
+    out, size = [], 0
+    for it in items[start:]:
+        n = len(json.dumps(it)) + 2
+        if out and size + n > PAGE_BYTES:
+            break
+        out.append(it)
+        size += n
+    end = start + len(out)
+    return {key: out, "next": end if end < len(items) else None}
 MIDI_OUT = os.environ.get("PIANO_MIDI_OUT", "")      # substring of the port name; "" = first
 MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
 ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
@@ -172,12 +190,15 @@ class Pianod:
             if cmd == "status":
                 return {"state": self.state()}
             if cmd == "composers":
-                return {"composers": [{"name": c["name"], "slug": c["slug"], "works": len(c.get("works", []))}
-                                      for c in self.lib.composers]}
+                return page(req, "composers",
+                            [{"name": c["name"], "slug": c["slug"], "works": len(c.get("works", []))}
+                             for c in self.lib.composers])
             if cmd == "works":
-                return {"works": [{"id": w["id"], "title": w["title"]} for w in self.lib.works_of(req["slug"])]}
+                return page(req, "works", [{"id": w["id"], "title": w["title"]}
+                                           for w in self.lib.works_of(req["slug"])])
             if cmd == "recordings":
-                return {"works": [{"id": w["id"], "title": w["title"]} for w in self.lib.recordings()]}
+                return page(req, "works", [{"id": w["id"], "title": w["title"]}
+                                           for w in self.lib.recordings()])
             if cmd == "queue":
                 return {"queue": [w["title"] for w in self.queue], "index": self.index}
 

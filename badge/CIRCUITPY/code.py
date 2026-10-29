@@ -102,6 +102,19 @@ class Link:
 link = Link()
 
 
+def fetch(cmd, key, **kw):
+    """A whole list, a page at a time: pianod keeps each reply under the 4 KB a line may be.
+    The failed reply (or None) if a page doesn't come."""
+    items, offset = [], 0
+    while offset is not None:
+        r = link.request(cmd, offset=offset, **kw)
+        if not r or not r.get("ok"):
+            return None, r
+        items += r[key]
+        offset = r.get("next")
+    return items, None
+
+
 # --- drawing helpers --------------------------------------------------------------------
 def text(group, s, x, y, color=WHITE, scale=1, anchor=(0, 0)):
     """A label. Never drawn past the screen's edge: too long, and it is shortened to fit."""
@@ -408,11 +421,10 @@ def menu():
 
 
 def browse():
-    r = link.request("composers")
-    if not r or not r.get("ok"):
-        report(r)
+    comps, failed = fetch("composers", "composers")
+    if comps is None:
+        report(failed)
         return
-    comps = r["composers"]
     sel = 0
     while True:
         i = choose(t("menu"), ["%s (%d)" % (c["name"], c["works"]) for c in comps], sel)
@@ -423,11 +435,10 @@ def browse():
 
 
 def browse_works(comp):
-    r = link.request("works", slug=comp["slug"])
-    if not r or not r.get("ok"):
-        report(r)
+    works, failed = fetch("works", "works", slug=comp["slug"])
+    if works is None:
+        report(failed)
         return
-    works = r["works"]
     sel = 0
     while True:
         i = choose(t("works_of", s=comp["name"]), [w["title"] for w in works], sel)
@@ -449,11 +460,10 @@ def browse_works(comp):
 
 
 def recordings():
-    r = link.request("recordings")
-    if not r or not r.get("ok"):
-        report(r)
+    works, failed = fetch("recordings", "works")
+    if works is None:
+        report(failed)
         return
-    works = r["works"]
     if not works:
         message(t("no_recordings"), t("no_recordings_body"), GREY)
         return
