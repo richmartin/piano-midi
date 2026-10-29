@@ -101,7 +101,6 @@ class Pianod:
                 "works": len(self.lib.all_works()),
                 "perf": self.looper.status(),
                 "calib": self.calib.status() if self.calib else None,
-                "calib_summary": self.calib_summary,
             }
 
     def _push(self):
@@ -154,7 +153,7 @@ class Pianod:
             reply = self._handle(cmd, req)
         except (ValueError, KeyError, TypeError, OSError, looper.LooperError) as e:
             return {"ok": False, "error": str(e)}
-        if cmd not in ("status", "composers", "works", "queue", "recordings"):
+        if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary"):
             self._push()
         return {"ok": True, **(reply or {})}
 
@@ -165,7 +164,7 @@ class Pianod:
         with self.lock:
             if self._calibrating() and cmd not in (
                     "status", "composers", "works", "recordings", "queue", "calibrate_cancel",
-                    "panic"):
+                    "calibrate_summary", "panic"):
                 raise ValueError("calibrating (cancel it first)")
             if cmd == "status":
                 return {"state": self.state()}
@@ -249,6 +248,10 @@ class Pianod:
                 self.calib_summary = []
                 threading.Thread(target=self._run_calibration, daemon=True, name="calibrate").start()
                 return {}
+            if cmd == "calibrate_summary":
+                # Its own request, not in the pushed state: it can run to dozens of lines, and
+                # the badge drops any line over 4 KB.
+                return {"lines": self.calib_summary[:int(req.get("limit", 1000))]}
             if cmd == "calibrate_cancel":
                 if not self._calibrating():
                     raise ValueError("not calibrating")

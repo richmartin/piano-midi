@@ -48,8 +48,9 @@ def show(st: dict) -> None:
         if c["flags"]:
             line += f", {c['flags']} flagged"
         print(line)
-        for s in st.get("calib_summary") or []:
-            print(f"  {s}")
+        if c["phase"] == "done":
+            for s in request({"cmd": "calibrate_summary"}).get("lines", []):
+                print(f"  {s}")
     if st["mode"] == "performance":
         p = st["perf"]
         line = f"Performance: {p['state']}"

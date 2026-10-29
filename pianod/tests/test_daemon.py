@@ -150,3 +150,28 @@ def test_panic_stops_and_silences(d):
     ok(d, "panic")
     assert not d.player.playing
     assert ("cc", 123, 0) in d.out.sent
+
+
+def test_calibrate_blocks_playback_and_fails_cleanly_with_no_piano(d, monkeypatch):
+    from pianod import calibrate
+    monkeypatch.setattr(calibrate.Mic, "find", classmethod(lambda cls: None))
+    ok(d, "calibrate")
+    assert ok(d, "status")["state"]["calib"]["phase"] in ("preflight", "measuring")
+    r = d.handle({"cmd": "play", "slug": "bach-js"})
+    assert not r["ok"] and "calibrating" in r["error"]
+    # Nothing answers on the key sensors, so preflight names the wagon settings.
+    assert wait_for(lambda: d.calib.finished, timeout=5)
+    c = ok(d, "status")["state"]["calib"]
+    assert c["phase"] == "failed" and "MIDI button" in c["message"]
+    ok(d, "play", slug="bach-js")                  # free again
+
+
+def test_calibrate_with_a_delay_can_be_cancelled(d, monkeypatch):
+    from pianod import calibrate
+    monkeypatch.setattr(calibrate.Mic, "find", classmethod(lambda cls: None))
+    ok(d, "calibrate", delay=10)
+    assert ok(d, "status")["state"]["calib"]["starts_in"] == 600
+    ok(d, "calibrate_cancel")
+    assert wait_for(lambda: d.calib.finished)
+    assert d.calib.phase == "cancelled"
+    assert ok(d, "calibrate_summary")["lines"] == []

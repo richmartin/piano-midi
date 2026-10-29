@@ -6,7 +6,7 @@
 #
 # Buttons mean the same everywhere, so they can be labelled on the enclosure:
 #   A       the "do music" button: play/pause - and in Performance mode record/loop/overdub
-#   B       stop (in Performance mode: end the take / stop / play)
+#   B       stop (in Performance mode: end the take / stop / play; calibrating: cancel)
 #   START   shuffle everything (in Performance mode: save the take)
 #   SELECT  menu (in a menu: straight back to the home screen)
 #   d-pad   home: UP/DOWN volume, LEFT/RIGHT previous/next piece
@@ -310,6 +310,11 @@ def home():
         if st:
             key = (st["playing"], st.get("title"), int(st.get("pos", 0)), st.get("volume"),
                    st.get("next_title"), st.get("midi_out"), st.get("mode"))
+        if st and calibrating_now(st):
+            # A calibration owns the piano (started here, from the CLI, or on a timer).
+            guarded(calibration)
+            shown = None
+            continue
         if (key, link.connected()) != shown:
             shown = (key, link.connected())
             draw_home(st)
@@ -383,7 +388,8 @@ def draw_home(st):
 # --- menus and browsing ---------------------------------------------------------------------
 def menu():
     entries = (("m_browse", browse), ("m_recordings", recordings), ("m_perform", performance),
-               ("m_shuffle", shuffle_all), ("m_sync", sync), ("m_info", info))
+               ("m_shuffle", shuffle_all), ("m_sync", sync), ("m_calibrate", calibrate),
+               ("m_info", info))
     start = 0
     while True:
         i = choose(t("menu"), [t(key) for key, _fn in entries], start)
@@ -577,6 +583,99 @@ def draw_perf(st, p):
         text(g, layout.mmss(p["length"]), W - layout.MARGIN, 80, DIM, 1, (1.0, 0))
     text(g, body, W // 2, 98, GREY, 1, (0.5, 0))
     hint(g, t("hint_perf"))
+
+
+# --- calibration ----------------------------------------------------------------------------
+CAL_ACTIVE = ("waiting", "preflight", "measuring", "paused")
+CAL_DELAYS = (0, 10, 30)
+
+
+def calibrating_now(st):
+    c = st.get("calib")
+    return bool(c) and c.get("phase") in CAL_ACTIVE
+
+
+def calibrate():
+    """Measure every key — up to an hour, so it can start later and run with nobody home."""
+    i = choose(t("cal_when"), [t("cal_now") if n == 0 else t("cal_in", n=n) for n in CAL_DELAYS])
+    if i is None:
+        return
+    r = link.request("calibrate", delay=CAL_DELAYS[i])
+    if r is None or not r.get("ok"):
+        report(r)
+        return
+    raise GoHome()          # home sees it running and shows it
+
+
+def calibration():
+    """The calibration screen, while one runs; then its result, once."""
+    shown = None
+    while True:
+        link.poll()
+        st = link.state if link.connected() else None
+        c = (st or {}).get("calib") or {}
+        phase = c.get("phase")
+        if st is not None and phase not in CAL_ACTIVE:
+            calibration_result(c)
+            return
+        key = (phase, c.get("starts_in"), c.get("done"), c.get("eta"), c.get("message"),
+               link.connected())
+        if key != shown:
+            shown = key
+            draw_calibration(st, c)
+        k = inp.key()
+        if k is None:
+            time.sleep(0.05)
+            continue
+        if k == B:
+            try:
+                stop = choose(t("cal_cancel_q"), [t("c_go_on"), t("c_stop")]) == 1
+            except GoHome:
+                stop = False
+            if stop:
+                report_quietly(link.request("calibrate_cancel"))
+            shown = None
+
+
+def draw_calibration(st, c):
+    g = screen()
+    text(g, t("cal_title"), W // 2, 2, CYAN, 1, (0.5, 0))
+    if st is None:
+        text(g, t("no_contact")[0], W // 2, 50, ORANGE, 1, (0.5, 0.5))
+        return
+    phase = c.get("phase")
+    if phase == "waiting":
+        text(g, t("cal_waiting"), W // 2, 26, GREY, 1, (0.5, 0.5))
+        text(g, layout.mmss(c.get("starts_in", 0)), W // 2, 46, WHITE, 3, (0.5, 0.5))
+        text(g, t("cal_leave"), W // 2, 76, GREY, 1, (0.5, 0))
+    else:
+        word = {"preflight": t("cal_preflight"), "paused": t("cal_paused")}.get(
+            phase, t("cal_measuring", k=c.get("key") or ""))
+        text(g, word, W // 2, 30, ORANGE if phase == "paused" else WHITE, 2, (0.5, 0.5))
+        n, of = c.get("done", 0), c.get("of", 88) or 88
+        progress(g, 50, n / of)
+        text(g, t("cal_keys", n=n, of=of), W // 2, 58, GREY, 1, (0.5, 0))
+        if c.get("eta") is not None:
+            text(g, t("cal_eta", m=(c["eta"] + 59) // 60), W // 2, 72, GREY, 1, (0.5, 0))
+        y = 88
+        for line in wrap(c.get("message") or "", 26)[:2]:
+            text(g, line, W // 2, y, ORANGE, 1, (0.5, 0))
+            y += 12
+    hint(g, t("hint_cal"))
+
+
+def calibration_result(c):
+    phase = c.get("phase")
+    if phase == "done":
+        r = link.request("calibrate_summary", limit=40)
+        lines = [part for line in ((r or {}).get("lines") or [t("cal_done")])
+                 for part in wrap(line, 26)]
+        choose(t("cal_done"), lines, 0, t("hint_back"))
+    elif phase == "failed":
+        message(t("cal_failed"), c.get("message", ""), RED, 0)
+        wait_key()
+    elif phase == "cancelled":
+        message(t("cal_cancelled"), "", GREY, 1.5)
 
 
 # --- main -------------------------------------------------------------------------------
