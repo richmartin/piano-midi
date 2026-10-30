@@ -23,6 +23,8 @@ Environment=PIANO_ECHO_MS=250
 # Warnings and errors to murdoch's rsyslog too (LAN only; it accepts only the Pi's address):
 # ssh murdoch tail -f /var/log/pianopi/pianod.log
 Environment=PIANO_SYSLOG=192.168.0.51:1514
+# Quiet hours: Saxy's Band (POST /api/events) takes dry runs only (live.py).
+Environment=PIANO_CURFEW=22:00-07:00
 
 [Install]
 WantedBy=multi-user.target
