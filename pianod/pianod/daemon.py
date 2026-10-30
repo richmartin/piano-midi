@@ -28,6 +28,9 @@ LOG = logging.getLogger("pianod")
 
 DATA = os.environ.get("PIANO_DATA", "/var/lib/piano")
 SOCK = os.environ.get("PIANO_SOCK", "/run/piano/pianod.sock")
+# Warnings and errors also go here, as syslog over UDP ("host:port"), so they can be read off the
+# Pi: its journal is in RAM and goes with every reboot. Unset: the journal only.
+SYSLOG = os.environ.get("PIANO_SYSLOG", "")
 SERIAL_GLOB = os.environ.get("PIANO_SERIAL", "/dev/serial/by-id/*Adafruit*-if02")
 SERVER_URL = os.environ.get("PIANO_SERVER", "http://piano.fam-mart.in")     # LAN only
 PAGE_BYTES = 3000              # the badge drops any line over 4 KB: lists go in pages under it
@@ -202,10 +205,21 @@ class Pianod:
     # --- requests ------------------------------------------------------------------------
     def handle(self, req: dict) -> dict:
         cmd = req.get("cmd")
+        if cmd == "log":
+            # The panel's own errors (its tracebacks), to land in the same log as ours.
+            LOG.warning("panel: %s", str(req.get("text", ""))[:2000])
+            return {"ok": True}
         try:
             reply = self._handle(cmd, req)
-        except (ValueError, KeyError, TypeError, OSError, looper.LooperError) as e:
+        except (ValueError, OSError, looper.LooperError) as e:
+            LOG.warning("%s failed: %s (%s)", cmd, e, _brief_req(req))
             return {"ok": False, "error": str(e)}
+        except KeyError as e:
+            LOG.warning("%s failed: missing %s (%s)", cmd, e, _brief_req(req))
+            return {"ok": False, "error": f"{cmd}: missing {e}"}
+        except Exception as e:                          # a bug: say so, and keep serving
+            LOG.exception("%s crashed (%s)", cmd, _brief_req(req))
+            return {"ok": False, "error": f"{cmd}: {type(e).__name__}: {e}"}
         if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
                        "net", "wifi_scan", "wifi_log", "pianists", "pianist_works", "collection",
                        "favourites", "shelves"):
@@ -559,7 +573,9 @@ def _serve_lines(d: Pianod, read_line, write_line, push: bool, name: str):
                 send({"ok": False, "error": "not JSON"})
                 continue
             reply = d.handle(req)
-            if "id" in req:
+            if "rid" in req:                    # the panel's request number, for its reply
+                reply["rid"] = req["rid"]
+            elif "id" in req and req.get("cmd") != "fav":   # older panels; "fav" uses id for the work
                 reply["id"] = req["id"]
             send(reply)
     finally:
@@ -630,6 +646,27 @@ def serve_panel(d: Pianod):
         time.sleep(1)
 
 
+def _brief_req(req: dict) -> str:
+    return json.dumps({k: v for k, v in req.items() if k not in ("psk",)})[:300]
+
+
+def _remote_log(target: str) -> None:
+    """Copy warnings and errors to a syslog receiver on the LAN, "host:port" (UDP)."""
+    import logging.handlers
+    host, _, port = target.rpartition(":")
+    try:
+        h = logging.handlers.SysLogHandler(address=(host, int(port)),
+                                           facility=logging.handlers.SysLogHandler.LOG_LOCAL0)
+    except (OSError, ValueError) as e:
+        LOG.warning("no remote log at %s: %s", target, e)
+        return
+    h.setLevel(logging.WARNING)
+    h.setFormatter(logging.Formatter("pianod: %(levelname)s %(message)s"))
+    logging.getLogger().addHandler(h)
+
+
 def main():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if SYSLOG:
+        _remote_log(SYSLOG)
     Pianod().run()

@@ -58,7 +58,7 @@ class Link:
     def send(self, cmd, **kw):
         rid = self.next_id
         self.next_id += 1
-        kw["cmd"], kw["id"] = cmd, rid
+        kw["cmd"], kw["rid"] = cmd, rid      # "rid": "id" is a work's id (fav)
         if LINK is not None:
             try:
                 LINK.write((json.dumps(kw) + "\n").encode())
@@ -85,8 +85,8 @@ class Link:
             elif kind == "keys":
                 if self.keys is not None:
                     self.keys.press(msg.get("on", ()), msg.get("off", ()))
-            elif "id" in msg:
-                self.replies[msg["id"]] = msg
+            elif "rid" in msg:
+                self.replies[msg["rid"]] = msg
         if len(self.buf) > 4096:    # garbage: start afresh
             self.buf = b""
 
@@ -217,6 +217,14 @@ def pause(seconds):
 def say(title, body="", color=IVORY, seconds=1.5):
     ui.message(title, body, color)
     pause(seconds)
+
+
+def log_error(e):
+    """Send a traceback to pianod, which logs it with its own (and on to murdoch)."""
+    try:
+        link.send("log", text="".join(traceback.format_exception(e))[-1500:])
+    except Exception:        # noqa: BLE001 - logging must never make it worse
+        pass
 
 
 def report(r, ok_key=None):
@@ -1025,6 +1033,7 @@ def guarded(fn):
         pass
     except Exception as e:   # noqa: BLE001 - anything at all
         traceback.print_exception(e)
+        log_error(e)
         say(t("sorry"), t("sorry_body"), ORANGE, 2.5)
 
 
@@ -1046,4 +1055,5 @@ while True:
         home()
     except Exception as e:   # noqa: BLE001
         traceback.print_exception(e)
+        log_error(e)
         say(t("sorry"), t("sorry_body"), ORANGE, 1.5)

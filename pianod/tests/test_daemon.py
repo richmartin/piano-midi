@@ -227,3 +227,27 @@ def test_keys_go_to_the_panel_in_batches_and_short_notes_still_flash(d):
     assert keys[0] == {"type": "keys", "on": [60, 64], "off": []}
     assert keys[1] == {"type": "keys", "on": [], "off": [60]}
     assert len(keys) == 2
+
+
+def test_the_panel_numbers_requests_with_rid_so_fav_keeps_its_work_id(d):
+    sent, lines = [], [json.dumps({"cmd": "fav", "id": "file-id-000002", "rid": 7}), None]
+    daemon._serve_lines(d, lambda: lines.pop(0), sent.append, False, "test")
+    reply = json.loads(sent[0])
+    assert reply["ok"] and reply["fav"] is True and reply["rid"] == 7 and "id" not in reply
+
+
+def test_failures_are_logged_and_bugs_dont_kill_the_connection(d, caplog, monkeypatch):
+    with caplog.at_level("WARNING", logger="pianod"):
+        r = d.handle({"cmd": "pianist_works"})              # no slug
+        assert not r["ok"] and r["error"] == "pianist_works: missing 'slug'"
+        monkeypatch.setattr(d.lib, "pianist_list", lambda: 1 / 0)
+        r = d.handle({"cmd": "pianists"})
+        assert not r["ok"] and "ZeroDivisionError" in r["error"]
+    text = caplog.text
+    assert "pianist_works failed: missing 'slug'" in text and "pianists crashed" in text
+
+
+def test_the_panel_can_log(d, caplog):
+    with caplog.at_level("WARNING", logger="pianod"):
+        assert d.handle({"cmd": "log", "text": "Traceback: boom"})["ok"]
+    assert "panel: Traceback: boom" in caplog.text
