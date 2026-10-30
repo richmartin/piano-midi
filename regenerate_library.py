@@ -829,6 +829,27 @@ class MidiLibraryGenerator:
 MUSICIAN = re.compile(r"\b(composer|pianist|musician|organist|harpsichordist|conductor|songwriter)", re.I)
 
 
+def clean_summary(text):
+    """Wikipedia's first sentence without its opening aside: "Modest Mussorgsky (; Russian:
+    Модест …; IPA: …; 21 March 1839 – …) was" reads as "Modest Mussorgsky (21 March 1839 – …)"
+    at best; asides with pronunciations, other scripts or name variants go entirely."""
+    def aside(m):
+        inner = m.group(1)
+        if re.search(r"[;:]|IPA|born|pronounced|[\u0250-\u02af\u0370-\u1fff]", inner):
+            dates = re.search(r"\d{1,2}?\s*\w*\s*\d{4}\s*[–-]\s*\d{1,2}?\s*\w*\s*\d{4}", inner)
+            return f" ({dates.group(0).strip()})" if dates else ""
+        return m.group(0)
+    return re.sub(r"\s*\(((?:[^()]|\([^()]*\))*)\)", aside, text, count=1)
+
+
+def thumbnail(url, px=330):          # a width Commons serves (it refuses arbitrary ones)
+    """A Wikimedia Commons original -> its px-wide thumbnail (a portrait 168 px across doesn't
+    need the 2 MB scan). Other URLs, and formats Commons doesn't thumbnail as themselves, as is."""
+    m = re.match(r"(https://upload\.wikimedia\.org/wikipedia/(?:commons|en))/([0-9a-f]/[0-9a-f]{2})/([^/?]+\.(?:jpe?g|png))(?:\?.*)?$",
+                 url or "", re.I)
+    return f"{m[1]}/thumb/{m[2]}/{m[3]}/{px}px-{m[3]}" if m else url
+
+
 def people_from(library, lookup):
     """{"composers": {slug: {image, summary}}, "pianists": {...}} for the tidied catalogue,
     looked up by each person's canonical full name. `lookup(name, kind)` -> {"image", "summary"} or None (WikipediaClient.musician)."""
@@ -839,6 +860,8 @@ def people_from(library, lookup):
             if p.get("slug") in (None, "", "unknown"):
                 continue
             found = lookup(p["name"], wiki_kind)
+            if found:
+                found = {"image": thumbnail(found.get("image")), "summary": clean_summary(found["summary"])}
             if found:
                 out[kind][p["slug"]] = found
     return out

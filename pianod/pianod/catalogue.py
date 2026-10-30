@@ -360,7 +360,10 @@ def tidy(lib: dict, duration=None) -> dict:
 
     composers = []
     for slug, ws in by_composer.items():
+        # A work's movements together, and each source's set together (two "Pictures at an
+        # Exhibition" sets, each from I): the original title without its "-N" groups them.
         ws.sort(key=lambda w: (_natural(re.sub(r"\s*\((arr\.|Introduction).*?\)", "", w["title"])),
+                               re.sub(r"-[\d,\s]+$", "", w.get("original") or ""),
                                _movement_order(w["movement"]), w["id"]))
         composers.append({**_composer_entry(slug, table[slug]), "works": ws})
     composers.sort(key=lambda c: (c["slug"] == UNKNOWN, c["sort"], c["slug"]))
