@@ -21,6 +21,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import time
 import unicodedata
 import sys
 
@@ -145,6 +146,7 @@ class WikipediaClient:
         Fetches the main page image using the MediaWiki API,
         which is more reliable than the wikipedia library's.images property.
         """
+        time.sleep(self.PACE)
         params = {
             "action": "query",
             "prop": "pageimages",
@@ -171,6 +173,22 @@ class WikipediaClient:
             logging.warning(f"Failed to fetch image for {page_title}: {e}")
         return None
 
+    PACE = 0.5            # seconds between requests: Wikipedia limits unhurried clients less
+    BACKOFF = (5, 15, 45)  # and when it does answer "too many requests" (as an HTML page)
+
+    def _page(self, title):
+        """wikipedia.page, paced, and retried with back-off when rate-limited: its refusal is an
+        HTML page, which the package reports as a JSON error (ValueError)."""
+        for wait in self.BACKOFF + (None,):
+            time.sleep(self.PACE)
+            try:
+                return wikipedia.page(title, auto_suggest=False)
+            except ValueError:
+                if wait is None:
+                    raise
+                logging.info(f"Wikipedia is limiting us; waiting {wait} s")
+                time.sleep(wait)
+
     def musician(self, name, kind):
         """{"image", "summary"} for the musician called `name` (kind: composer or pianist), or
         None. Tries the disambiguated page first ("John Ireland (composer)", not the actor) and
@@ -181,7 +199,7 @@ class WikipediaClient:
         found = None
         for title in (f"{name} ({kind})", name, f"{name} (musician)", f"{name} {kind}"):
             try:
-                page = wikipedia.page(title, auto_suggest=False)
+                page = self._page(title)
             except (wikipedia.exceptions.DisambiguationError, wikipedia.exceptions.PageError):
                 continue
             except (ValueError, requests.RequestException) as e:
@@ -670,19 +688,12 @@ class MidiLibraryGenerator:
                 if composer_slug not in model['composers']:
                     # Format for display: "Last, First (Dates)"
                     display_name = self._format_display_name(composer_name)
-                    
-                    # Clean name for Wiki search (remove dates)
-                    # "Amy Beach (1867-1944)" -> "Amy Beach"
-                    search_name = re.sub(r'\s+\(\d{4}-\d{4}\)', '', composer_name)
-                    
-                    wiki_data = self.wiki_client.get_entity_data(search_name, "composer")
-                    
+
                     model['composers'][composer_slug] = {
                         "name": display_name, # Use formatted name for UI
                         "slug": composer_slug,
                         "page_url": f"/composers/{composer_slug}.html",
                         "works": [],
-                        **wiki_data
                     }
                 model['composers'][composer_slug]['works'].append(file_id)
             
@@ -700,17 +711,12 @@ class MidiLibraryGenerator:
             if performer_slug not in model['performers']:
                 # Format for display: "Last, First (Dates)"
                 display_name = self._format_display_name(performer_name)
-                
-                # Clean name for Wiki search (remove dates)
-                search_name = re.sub(r'\s+\(\d{4}-\d{4}\)', '', performer_name)
-                
-                wiki_data = self.wiki_client.get_entity_data(search_name, "performer")
+
                 model['performers'][performer_slug] = {
                     "name": display_name,
                     "slug": performer_slug,
                     "page_url": f"/performers/{performer_slug}.html",
                     "works": [],
-                    **wiki_data
                 }
             model['performers'][performer_slug]['works'].append(file_id)
 
