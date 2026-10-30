@@ -22,7 +22,7 @@ import socket
 import threading
 import time
 
-from . import calibrate, calibration, library, looper, midiio, network, player, smf, store
+from . import calibrate, calibration, library, looper, midiio, network, player, smf, store, web
 
 LOG = logging.getLogger("pianod")
 
@@ -534,6 +534,7 @@ class Pianod:
         threading.Thread(target=self._midi_in_loop, daemon=True, name="midi-in").start()
         threading.Thread(target=self._watch_mic, daemon=True, name="mic-check").start()
         threading.Thread(target=self.lib.measure, daemon=True, name="durations").start()
+        web.serve(self, DATA)
         notify("READY=1")
         LOG.info("pianod up: %d works, MIDI out %s", len(self.lib.all_works()),
                  "connected" if self.out.connected else "NOT connected")

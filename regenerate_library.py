@@ -27,7 +27,6 @@ import sys
 import requests
 import wikipedia
 from datetime import datetime
-from jinja2 import Environment, FileSystemLoader
 
 # --- Configuration ---
 
@@ -104,6 +103,12 @@ def slugify(value):
 
 # --- Core Classes ---
 
+# Wikipedia refuses (with an HTML page, which reads as "non-JSON") clients that don't say who they
+# are; the wikipedia package sends no User-Agent of its own.
+USER_AGENT = "PianoPi-library-generator/2.0 (https://piano.fam-mart.in)"   # Wikimedia wants a URL or address
+wikipedia.set_user_agent(USER_AGENT)
+
+
 class WikipediaClient:
     """
     Handles fetching and caching data from Wikipedia.
@@ -115,7 +120,7 @@ class WikipediaClient:
         self.session = requests.Session()
         # Set a user-agent as required by MediaWiki API
         self.session.headers.update({
-            'User-Agent': 'MIDI-Library-Generator/1.0 (https://example.com; cool-user@example.com)'
+            'User-Agent': USER_AGENT
         })
 
     def _load_cache(self):
@@ -165,6 +170,29 @@ class WikipediaClient:
         except requests.RequestException as e:
             logging.warning(f"Failed to fetch image for {page_title}: {e}")
         return None
+
+    def musician(self, name, kind):
+        """{"image", "summary"} for the musician called `name` (kind: composer or pianist), or
+        None. Tries the disambiguated page first ("John Ireland (composer)", not the actor) and
+        keeps the first page that is about a musician. Cached, misses too."""
+        key = f"musician:{kind}:{name}"
+        if key in self.cache:
+            return self.cache[key]
+        found = None
+        for title in (f"{name} ({kind})", name, f"{name} (musician)", f"{name} {kind}"):
+            try:
+                page = wikipedia.page(title, auto_suggest=False)
+            except (wikipedia.exceptions.DisambiguationError, wikipedia.exceptions.PageError):
+                continue
+            except (ValueError, requests.RequestException) as e:
+                logging.warning(f"Wikipedia lookup for {name!r} failed: {e}")
+                return None                   # not cached: try again next time
+            if MUSICIAN.search(page.summary[:600]):
+                found = {"image": self._get_page_image(page.title), "summary": page.summary.split("\n")[0]}
+                break
+        self.cache[key] = found
+        self._save_cache()
+        return found
 
     def get_entity_data(self, name, entity_type="composer"):
         """
@@ -233,31 +261,23 @@ class MidiLibraryGenerator:
     def __init__(self, input_dir, template_dir, output_dir, ids_from=None):
         self.ids_from = ids_from
         self.input_dir = pathlib.Path(input_dir)
-        self.template_dir = pathlib.Path(template_dir)
         self.output_dir = pathlib.Path(output_dir)
 
         # Ensure directories exist
         if not self.input_dir.is_dir():
             raise FileNotFoundError(f"Input directory not found: {input_dir}")
-        if not self.template_dir.is_dir():
-            raise FileNotFoundError(f"Template directory not found: {template_dir}")
+        # The web player (web/ beside this script). --template-dir is accepted and ignored: the
+        # old Jinja templates are gone, and scripts that still pass it keep working.
+        self.web_dir = pathlib.Path(__file__).resolve().parent / "web"
+        if not (self.web_dir / "index.html").is_file():
+            raise FileNotFoundError(f"The web player isn't at {self.web_dir}")
         
         # Setup output directories
-        self.static_dir = self.output_dir / "static"
         self.midi_files_dir = self.output_dir / "midi-files"
-        self.composers_dir = self.output_dir / "composers"
-        self.performers_dir = self.output_dir / "performers"
-        self.files_dir = self.output_dir / "files"
 
         # Initialize Wikipedia client
         cache_file = self.input_dir / WIKI_CACHE_FILE
         self.wiki_client = WikipediaClient(cache_file)
-        
-        # Initialize Jinja2
-        self.jinja_env = Environment(
-            loader=FileSystemLoader(self.template_dir),
-            autoescape=True
-        )
         
         # Generate Build ID
         self.build_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -267,18 +287,25 @@ class MidiLibraryGenerator:
         logging.info(f"Ensuring output directories exist at: {self.output_dir}")
         
         self.output_dir.mkdir(exist_ok=True)
-        self.static_dir.mkdir(exist_ok=True)
         self.midi_files_dir.mkdir(exist_ok=True)
-        self.composers_dir.mkdir(exist_ok=True)
-        self.performers_dir.mkdir(exist_ok=True)
-        self.files_dir.mkdir(exist_ok=True)
 
-    def _copy_static_assets(self):
-        """Copies static assets (CSS, JS) from template dir to output dir."""
-        template_static_dir = self.template_dir / "static"
-        if template_static_dir.is_dir():
-            logging.info("Copying static assets...")
-            shutil.copytree(template_static_dir, self.static_dir, dirs_exist_ok=True)
+    # What the old site published and the web player replaces: the remote control, the device
+    # selector's browser-MIDI pages, one page per composer, performer and file.
+    OLD_SITE = ("static", "composers", "performers", "files", "remote.html")
+
+    def _publish_web_player(self):
+        """The web player: web/ as it is, its index.html stamped with the build (cache busting),
+        and what the old site left behind removed."""
+        for name in self.OLD_SITE:
+            old = self.output_dir / name
+            if old.is_dir():
+                shutil.rmtree(old)
+            elif old.exists():
+                old.unlink()
+        shutil.copytree(self.web_dir, self.output_dir, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("*.md", ".*"))
+        index = self.output_dir / "index.html"
+        index.write_text(index.read_text(encoding="utf-8").replace("__BUILD__", self.build_id), encoding="utf-8")
 
     def _stable_ids(self, files):
         """Each MIDI file's id, kept in ids.json beside the site so it never changes: the Pi
@@ -603,7 +630,6 @@ class MidiLibraryGenerator:
         """
         # FIX 2: Create directories *before* trying to copy files [3]
         self._setup_output_dirs()
-        self._copy_static_assets()
         
         logging.info("Building data model...")
         midi_files = self._find_midi_files()
@@ -741,69 +767,13 @@ class MidiLibraryGenerator:
         logging.info("Data model and playlists complete.")
         return model
 
-    def _render_template(self, template_name, context, output_path):
-        """Helper to render a single Jinja2 template."""
-        template = self.jinja_env.get_template(template_name)
-        # Inject build_id into context
-        context['build_id'] = self.build_id
-        html = template.render(context)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(html)
-
     def render_static_site(self, model):
-        """
-        Renders the complete static site from the data model.
-        """
-        # FIX 2: Removed _setup_output_dirs() and _copy_static_assets() from here
-        
-        logging.info("Rendering all HTML pages...")
-        
-        # 1. Render Index
-        self._render_template(
-            "index.html",
-            {"model": model, "composers": sorted(model['composers'].values(), key=lambda x: x['name'])},
-            self.output_dir / "index.html"
-        )
+        """The web player, library.json (the tidied catalogue, which the Pi mirrors) and
+        people.json (portraits and a paragraph from Wikipedia, for the player's pages)."""
+        logging.info("Publishing the web player...")
+        self._publish_web_player()
 
-        # 2. Render Composer Pages
-        for slug, composer in model['composers'].items():
-            playlist_json = json.dumps(model['playlists'].get(f"composer-{slug}", ))
-            self._render_template(
-                "composer.html",
-                {"model": model, "composer": composer, "playlist_json": playlist_json},
-                self.composers_dir / f"{slug}.html"
-            )
-            
-        # 3. Render Performer Pages
-        for slug, performer in model['performers'].items():
-            playlist_json = json.dumps(model['playlists'].get(f"performer-{slug}", ))
-            self._render_template(
-                "performer.html",
-                {"model": model, "performer": performer, "playlist_json": playlist_json},
-                self.performers_dir / f"{slug}.html"
-            )
-            
-        # 4. Render File Pages
-        for file_id, file_data in model['files'].items():
-            playlist = [{
-                "url": file_data['midi_url'],
-                "title": file_data['title']
-            }]
-            playlist_json = json.dumps(playlist)
-            self._render_template(
-                "file.html",
-                {"model": model, "file": file_data, "playlist_json": playlist_json},
-                self.files_dir / f"{file_id}.html"
-            )
-        
-        # 5. Render Remote Control Page
-        self._render_template(
-            "remote.html",
-            {"model": model},
-            self.output_dir / "remote.html"
-        )
-
-        # 6. Generate Library JSON for Remote
+        # library.json, built from the model, then tidied
         library_data = {
             "composers": []
         }
@@ -845,8 +815,33 @@ class MidiLibraryGenerator:
         library_data = catalogue.tidy(library_data, duration=duration)
         with open(self.output_dir / "library.json", 'w', encoding='utf-8') as f:
             json.dump(library_data, f, ensure_ascii=False)
+        with open(self.output_dir / "people.json", 'w', encoding='utf-8') as f:
+            json.dump(self._people(library_data), f, ensure_ascii=False)
 
         logging.info("Site generation complete.")
+
+    def _people(self, library):
+        return people_from(library, self.wiki_client.musician)
+
+
+# A Wikipedia summary is shown only if it's about a musician: a lookup by name alone can land
+# on a namesake (a footballer, a bishop) and a wrong biography is worse than none.
+MUSICIAN = re.compile(r"\b(composer|pianist|musician|organist|harpsichordist|conductor|songwriter)", re.I)
+
+
+def people_from(library, lookup):
+    """{"composers": {slug: {image, summary}}, "pianists": {...}} for the tidied catalogue,
+    looked up by each person's canonical full name. `lookup(name, kind)` -> {"image", "summary"} or None (WikipediaClient.musician)."""
+    out = {"composers": {}, "pianists": {}}
+    for kind, items, wiki_kind in (("composers", library.get("composers", []), "composer"),
+                                   ("pianists", library.get("pianists", []), "pianist")):
+        for p in items:
+            if p.get("slug") in (None, "", "unknown"):
+                continue
+            found = lookup(p["name"], wiki_kind)
+            if found:
+                out[kind][p["slug"]] = found
+    return out
 
 
 # --- Main Execution ---
@@ -864,8 +859,7 @@ def main():
     )
     parser.add_argument(
         '-t', '--template-dir',
-        required=True,
-        help="Path to the directory containing Jinja2 templates (base.html, etc.)"
+        help="Ignored: the web player is web/ beside this script (kept so older scripts still run)"
     )
     parser.add_argument(
         '-o', '--output-dir',

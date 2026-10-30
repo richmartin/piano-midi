@@ -259,15 +259,22 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
 - The catalogue is tidied by `pianod/pianod/catalogue.py` (canonical composers with dates and
   eras, pianists and roll systems, clean titles, lengths), used by both the generator and
   pianod, so an old library.json still browses properly on the Pi.
-- The web player only controls the Pi and piano: the old remote-control features (a phone
-  driving a browser that played to the piano) and the Output Device selector go.
+- The web player (`web/`, published by the generator) only controls the Pi and piano: no sound in
+  the browser, no remote control, no output selector. One page: library.json and people.json
+  (portraits and a paragraph from Wikipedia, kept only if it's about a musician) for browsing;
+  pianod's HTTP API for everything else (`pianod/pianod/web.py`, port 8080, library and
+  playback commands only). murdoch passes `piano.fam-mart.in/api/` through to the Pi, so page
+  and API share an origin; `/api/events` is server-sent events (state pushes and the keys as
+  they move), which is also how the page knows whether the piano is connected. With
+  `PIANO_WEB=<dir>` pianod serves the page itself, from its own mirror.
+- Errors: pianod logs failed requests and the panel's tracebacks, and copies warnings and errors
+  to murdoch's rsyslog (192.168.0.51:1514 → /var/log/pianopi/pianod.log; murdoch-local's).
 - pianod syncs from `http://piano.fam-mart.in` (live 2026-10-29: 600 of 609 files kept their ids,
   matched by content; 9 new).
 
 ## Later (server side, not in this repo yet)
 
-- murdoch app at piano.fam-mart.in: web remote speaking the same protocol (the Pi dials out),
-  recordings synced up into the library as performers, smart-plug power orchestration via the
+- Recordings synced up into the library as performers, smart-plug power orchestration via the
   existing Mosquitto/zigbee2mqtt (plug on → warm-up wait → play; queue empty + no keys played +
   N minutes → panic, grace, plug off). Power metering is the "piano is actually on" signal.
 - If someone is playing the keys (MIDI IN outside Performance mode), don't start remote playback

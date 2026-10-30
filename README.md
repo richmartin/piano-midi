@@ -3,8 +3,10 @@
 Everything for the Yamaha player piano: the MIDI library site, and PianoPi — the Raspberry Pi +
 PyBadge control device that lives at the piano.
 
-- **`regenerate_library.py`** builds the static library site (piano.fam-mart.in, LAN only) from the MIDI
-  source tree on gdrive: browse by composer/performer, play in the browser over Web MIDI.
+- **`regenerate_library.py`** publishes the library (piano.fam-mart.in, LAN only) from the MIDI
+  source tree on gdrive: the files, the tidied catalogue, portraits, and the web player.
+- **`web/`** is the web player: browse the library and play it on the piano, through pianod's
+  HTTP API on the Pi. No sound in the browser; the piano is the only output.
 - **`pianod/`** runs on a Pi 4 cabled to the piano's MIDI interface: plays the library locally
   (it mirrors the whole thing), and is a loop station in Performance mode — record your playing,
   loop it back through the solenoids, overdub, save. `bin/piano` is the CLI.

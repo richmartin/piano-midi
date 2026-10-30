@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Piano</title>
+<meta name="theme-color" content="#14110f">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2314110f'/%3E%3Cg fill='%23efe6d2'%3E%3Crect x='4' y='8' width='5' height='17' rx='1'/%3E%3Crect x='10' y='8' width='5' height='17' rx='1'/%3E%3Crect x='16' y='8' width='5' height='17' rx='1'/%3E%3Crect x='22' y='8' width='6' height='17' rx='1'/%3E%3C/g%3E%3Cg fill='%2314110f'%3E%3Crect x='8' y='8' width='3' height='10'/%3E%3Crect x='14' y='8' width='3' height='10'/%3E%3Crect x='20' y='8' width='3' height='10'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css?v=__BUILD__">
+<script type="module" src="app.js?v=__BUILD__"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/"><span class="brand-mark" aria-hidden="true"></span>The Piano</a>
+  <label class="search">
+    <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4.5 4.5"/></svg>
+    <input id="q" type="search" placeholder="Search composers, pianists, pieces" autocomplete="off" spellcheck="false">
+  </label>
+  <nav class="nav">
+    <a href="#/composers">Composers</a>
+    <a href="#/pianists">Pianists</a>
+    <a href="#/favourites">Favourites</a>
+  </nav>
+  <div id="status" class="status" data-state="connecting" title="Looking for the piano…">
+    <span class="dot"></span><span class="label">Connecting</span>
+  </div>
+</header>
+
+<main id="view" tabindex="-1"></main>
+
+<footer id="player" class="player" data-empty="true">
+  <canvas id="keys" class="keys" height="28" aria-hidden="true"></canvas>
+  <div class="player-row">
+    <button id="np" class="np" aria-label="What's playing">
+      <span class="np-title">Nothing playing</span>
+      <span class="np-sub">Choose something, or let the piano surprise you</span>
+    </button>
+    <div class="transport">
+      <button id="prev" class="ctl" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button id="toggle" class="ctl big" aria-label="Play"><svg viewBox="0 0 24 24"><path class="i-play" d="M7 4v16l13-8z"/><path class="i-pause" d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg></button>
+      <button id="next" class="ctl" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+      <button id="stop" class="ctl" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+    </div>
+    <div class="progress">
+      <span id="pos" class="time">0:00</span>
+      <div id="bar" class="bar" role="slider" aria-label="Position" tabindex="0"><div id="fill" class="fill"></div></div>
+      <span id="len" class="time">0:00</span>
+    </div>
+    <label class="volume" title="Volume">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
+      <input id="vol" type="range" min="1" max="11" step="1" value="8" aria-label="Volume">
+    </label>
+  </div>
+</footer>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
