@@ -4,8 +4,7 @@
 #
 #   sudo image/update-card.sh /dev/sdX
 #
-# For when the Pi can't be reached over SSH (no network yet). Over SSH it's simpler to copy
-# /opt/piano/pianod in maintenance mode (piano-maint on).
+# For when the Pi can't be reached over SSH (no network yet). Over SSH: image/update-pi.sh.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
