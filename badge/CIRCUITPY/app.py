@@ -513,7 +513,7 @@ def collections():
         k, i = view.run()
         if k == B:
             return
-        work_list("collection", cols[i]["name"].upper(), collection=cols[i]["slug"])
+        work_list("collection", cols[i]["name"].upper(), slug=cols[i]["slug"])
 
 
 def favourites():
