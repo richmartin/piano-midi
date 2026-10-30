@@ -50,6 +50,11 @@ done
 # It shipped with BOOT_ORDER=0xf14 (USB mass storage, then SD): it looked for a boot disk on the
 # badge before the card. The bootloader flashes pieeprom.upd from the boot partition by itself at
 # the next power-on, then renames recovery.bin so it happens once.
+# Once it has, recovery.bin is RECOVERY.000: don't stage it again (and flash again) on every update.
+if [ -e "$BOOT/RECOVERY.000" ]; then
+  echo "fastboot: the bootloader was already updated from this card"
+  exit 0
+fi
 FW=$ROOT/usr/lib/firmware/raspberrypi/bootloader-2711/default
 bin=$(ls "$FW"/pieeprom-*.bin | sort | tail -1)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -60,5 +65,4 @@ python3 "$ROOT/usr/bin/rpi-eeprom-config" --config "$tmp/boot.conf" --out "$BOOT
 sha256sum "$BOOT/pieeprom.upd" | awk '{print $1}' > "$BOOT/pieeprom.sig"
 echo "ts: $(date -u +%s)" >> "$BOOT/pieeprom.sig"
 cp "$FW/recovery.bin" "$BOOT/recovery.bin"
-rm -f "$BOOT"/RECOVERY.0*
 echo "fastboot: $(basename "$bin") with BOOT_ORDER=0xf41 staged; $(tr ' ' '\n' < "$CMDLINE" | grep -c .) kernel args"
