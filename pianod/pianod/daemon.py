@@ -660,8 +660,9 @@ def _remote_log(target: str) -> None:
     except (OSError, ValueError) as e:
         LOG.warning("no remote log at %s: %s", target, e)
         return
+    h.ident = "pianod: "                    # the syslog tag the receiver files by
     h.setLevel(logging.WARNING)
-    h.setFormatter(logging.Formatter("pianod: %(levelname)s %(message)s"))
+    h.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
     logging.getLogger().addHandler(h)
 
 

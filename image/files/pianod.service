@@ -20,6 +20,9 @@ Environment=PYTHONPYCACHEPREFIX=/var/lib/piano/pycache
 # The DKW10's key sensors report its own playback on MIDI OUT (docs/design.md); the echo gate
 # drops it. Timing and velocity per key come from /var/lib/piano/calibration.json.
 Environment=PIANO_ECHO_MS=250
+# Warnings and errors to murdoch's rsyslog too (LAN only; it accepts only the Pi's address):
+# ssh murdoch tail -f /var/log/pianopi/pianod.log
+Environment=PIANO_SYSLOG=192.168.0.51:1514
 
 [Install]
 WantedBy=multi-user.target
