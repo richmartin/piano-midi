@@ -180,6 +180,11 @@ class GoHome(Exception):
     """Leave every screen at once, back to Play Something."""
 
 
+class ShowNowPlaying(GoHome):
+    """Leave every screen, then open Now Playing: the screens unwind first, so a long list they
+    held is freed before Now Playing needs the RAM (it didn't fit beside a collection's list)."""
+
+
 def tick():
     link.poll()
     ui.refresh()
@@ -385,10 +390,9 @@ def surprise():
 
 
 def play(**what):
-    """Play, then show it."""
+    """Play, then show it (once the screens that asked have let go of their lists)."""
     if report(link.request("play", **what)):
-        now_playing()
-        raise GoHome()
+        raise ShowNowPlaying()
 
 
 def star(work_id):
@@ -1029,6 +1033,9 @@ def guarded(fn):
     back. Never a crash screen."""
     try:
         fn()
+    except ShowNowPlaying:
+        gc.collect()
+        guarded(now_playing)
     except GoHome:
         pass
     except Exception as e:   # noqa: BLE001 - anything at all
@@ -1037,6 +1044,7 @@ def guarded(fn):
         say(t("sorry"), t("sorry_body"), ORANGE, 2.5)
 
 
+ui.load_fonts()                 # all of them now, while the heap is in one piece (see ui)
 gc.collect()
 print("free memory at start:", gc.mem_free())
 ui.DISPLAY.brightness = 1.0

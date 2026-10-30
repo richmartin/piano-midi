@@ -170,6 +170,14 @@ def font(name):
     return _fonts[name]
 
 
+def load_fonts():
+    """Every font's glyph table (2.6 KB each, 15.5 KB in all), at startup. Loaded when first
+    needed instead, the next one late in a session could find no 2.6 KB in one piece, however
+    much was free: a MemoryError opening Now Playing from a collection."""
+    for name in ("title", "title_s", "big", "body", "body_b", "label"):
+        font(name)
+
+
 def width(name, s):
     return font(name).width(s)
 
