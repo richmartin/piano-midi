@@ -296,7 +296,7 @@ def _natural(s: str):
 def _movement_order(m: str | None) -> int:
     if not m:
         return 0
-    first = re.split(r"[–,\s]", m)[0]
+    first = re.split(r"[–,\s]", m)[0].rstrip(".:")
     return _ROMAN.index(first) if first in _ROMAN else 99
 
 
@@ -330,7 +330,7 @@ def tidy(lib: dict, duration=None) -> dict:
         # filed under several composers and nothing says which: the one with most entries
         home = max(known, key=lambda s: (sum(1 for x in filed.values() if s in x), -known.index(s))) \
             if known else UNKNOWN
-        over = D.WORKS.get(wid, {})
+        over = D.WORKS.get(wid) or D.BY_ORIGINAL.get(original, {})
         p = parse_title(original, over.get("composer", home))
         for k in ("composer", "title", "performer", "roll", "arranger"):
             if k in over:

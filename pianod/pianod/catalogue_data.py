@@ -377,3 +377,17 @@ WORKS = {
     "file-id-000392": C(title="Variations & Fugue on a Theme by Handel, Op. 24 (Variations 16–25, Fugue)"),
     "file-id-000390": C(title="Variations on 'Nel cor più' from La Molinara"),
 }
+
+# The same overrides, for works known by their original title (the file name's title part)
+# rather than their id: files added from the repo (library-additions/) before they have one.
+BY_ORIGINAL = {
+    # piano-midi.de (Bernd Krueger, CC BY-SA 3.0 DE): Pictures at an Exhibition, movement names
+    "Pictures at an Exhibition-1": C(movement="I. Promenade · Gnomus"),
+    "Pictures at an Exhibition-2": C(movement="II. Promenade · Il vecchio castello"),
+    "Pictures at an Exhibition-3": C(movement="III. Promenade · Tuileries"),
+    "Pictures at an Exhibition-4": C(movement="IV. Bydło"),
+    "Pictures at an Exhibition-5": C(movement="V. Promenade · Ballet of the Unhatched Chicks"),
+    "Pictures at an Exhibition-6": C(movement="VI. Samuel Goldenberg and Schmuÿle"),
+    "Pictures at an Exhibition-7": C(movement="VII. Promenade · Limoges · Catacombae"),
+    "Pictures at an Exhibition-8": C(movement="VIII. Baba Yaga · The Great Gate of Kiev"),
+}
