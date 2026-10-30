@@ -344,7 +344,7 @@ def tidy(lib: dict, duration=None) -> dict:
             arr = p["arranger"]
             arr = table[arr]["short"] if arr in table else arr
             title += f" (arr. {arr})"
-        d = duration(wid) if duration else w.get("duration")
+        d = (duration(wid) if duration else None) or w.get("duration")
         work = {"id": wid, "title": title, "url": w.get("url", f"/midi-files/{wid}.mid"),
                 "movement": p["movement"], "performer": p["performer"], "roll": p["roll"],
                 "duration": round(d, 1) if isinstance(d, (int, float)) else None,

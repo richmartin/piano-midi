@@ -6,7 +6,8 @@ mirror from the server: library.json first, then any file the mirror is missing.
 immutable by id (file-id-000123.mid), so "missing" is the only check needed.
 
 Layout under root/:  library.json, midi-files/file-id-*.mid, recordings/*.mid (our own takes),
-durations.json (each work's length, measured once).
+durations.json (each work's length, measured once, in the background: on a Pi 4 the whole library
+takes minutes, longer than systemd waits for pianod to start).
 
 The catalogue is tidied (catalogue.tidy: canonical composers, eras, pianists, roll systems) when
 it's loaded, whether or not the server already did: a v1 library.json from an old server still
@@ -19,6 +20,7 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 
@@ -66,7 +68,8 @@ class Library:
         data = store.read_json(os.path.join(self.root, "library.json"), {"composers": []})
         try:
             from . import catalogue
-            data = catalogue.tidy(data, duration=self._durations(data))
+            known = store.read_json(os.path.join(self.root, "durations.json"), {})
+            data = catalogue.tidy(data, duration=known.get)
         except ImportError:
             pass
         except Exception:                     # a bad catalogue must never stop the piano playing
@@ -83,24 +86,29 @@ class Library:
                                         "performer_name": p["name"] if p else None,
                                         "performer_short": p.get("short") if p else None}
 
-    def _durations(self, data: dict):
-        """work id -> seconds, measured from the MIDI file once and kept in durations.json."""
+    def measure(self, pause: float = 0.02, save_every: int = 25) -> int:
+        """Measure the works with no length yet, keeping them in durations.json as it goes (so a
+        restart part way through loses little), then reload. Slow: run it off the main thread.
+        Returns how many were measured."""
         path = os.path.join(self.root, "durations.json")
         known = store.read_json(path, {})
-        changed = False
-        for c in data.get("composers", []):
-            for w in c.get("works", []):
-                if w.get("id") in known or w.get("duration"):
-                    continue
-                try:
-                    events, _ = smf.load(self.path(w))
-                    known[w["id"]] = round(events[-1].time, 1) if events else 0.0
-                    changed = True
-                except (OSError, ValueError, IndexError, KeyError):
-                    continue
-        if changed:
+        todo = [w for w in list(self._works.values()) if w["id"] not in known and not w.get("duration")]
+        n = 0
+        for w in todo:
+            try:
+                events, _ = smf.load(self.path(w))
+            except Exception:               # an unreadable file has no length; it mustn't stop the rest
+                continue
+            known[w["id"]] = round(events[-1].time, 1) if events else 0.0
+            n += 1
+            if n % save_every == 0:
+                store.write_json(path, known)
+            time.sleep(pause)               # leave the CPU to playback
+        if n:
             store.write_json(path, known)
-        return known.get
+            self.load()
+            LOG.info("measured %d works' lengths", n)
+        return n
 
     # --- browsing ---------------------------------------------------------------------------
     def composer_list(self) -> list[dict]:

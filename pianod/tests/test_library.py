@@ -27,15 +27,28 @@ def root(tmp_path):
 
 def test_lookups(root):
     lib = Library(root)
-    assert [c["slug"] for c in lib.composers] == ["albeniz-isaac", "bach-js"]
-    assert lib.work("file-id-000030")["title"] == "Cordoba"
-    assert lib.work("file-id-000030")["composer"] == "Albeniz, Isaac"
-    assert len(lib.works_of("albeniz-isaac")) == 2
+    assert [c["slug"] for c in lib.composers] == ["albeniz", "bach-js"]      # tidied
+    assert lib.work("file-id-000030")["title"] == "Córdoba"
+    assert lib.work("file-id-000030")["composer"] == "Isaac Albéniz"
+    assert len(lib.works_of("albeniz")) == 2
     assert len(lib.all_works()) == 3
     with pytest.raises(ValueError):
         lib.work("file-id-999999")
     with pytest.raises(ValueError):
         lib.works_of("nobody")
+
+
+def test_lengths_are_measured_later_and_kept(root):
+    lib = Library(root)                                  # starting up measures nothing
+    assert not os.path.exists(os.path.join(root, "durations.json"))
+    assert lib.work("file-id-000009")["duration"] is None
+    assert lib.measure(pause=0) == 0                     # the only file there is unreadable: skipped
+    from pianod import smf
+    smf.save(os.path.join(root, "midi-files", "file-id-000030.mid"),
+             [smf.Event("on", 0.0, 60, 64), smf.Event("off", 2.5, 60)])
+    assert lib.measure(pause=0) == 1
+    assert lib.work("file-id-000030")["duration"] == 2.5
+    assert json.load(open(os.path.join(root, "durations.json"))) == {"file-id-000030": 2.5}
 
 
 def test_path_and_missing(root):

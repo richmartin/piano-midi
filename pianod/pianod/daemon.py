@@ -387,7 +387,9 @@ class Pianod:
             with self.lock:
                 if self.player.playing:
                     raise ValueError("busy playing; sync later")
-            return self.lib.sync(SERVER_URL)
+            result = self.lib.sync(SERVER_URL)
+            threading.Thread(target=self.lib.measure, daemon=True, name="durations").start()
+            return result
         # The network (the panel is the Pi's only screen): slow, so outside the lock.
         if cmd == "net":
             return {"net": network.status()}
@@ -516,6 +518,7 @@ class Pianod:
         threading.Thread(target=serve_panel, args=(self,), daemon=True, name="panel").start()
         threading.Thread(target=self._midi_in_loop, daemon=True, name="midi-in").start()
         threading.Thread(target=self._watch_mic, daemon=True, name="mic-check").start()
+        threading.Thread(target=self.lib.measure, daemon=True, name="durations").start()
         notify("READY=1")
         LOG.info("pianod up: %d works, MIDI out %s", len(self.lib.all_works()),
                  "connected" if self.out.connected else "NOT connected")
