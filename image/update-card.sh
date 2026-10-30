@@ -58,6 +58,7 @@ for f in "$MNT/data/nm"/*.nmconnection; do
   fi
 done
 install -m 440 "$REPO/image/files/sudoers-piano" "$MNT/root/etc/sudoers.d/020_piano"
+install -m 644 "$REPO/image/files/nm-powersave.conf" "$MNT/root/etc/NetworkManager/conf.d/piano-powersave.conf"
 # The boot-time savings (see fastboot.sh); doing them again is harmless.
 "$REPO/image/fastboot.sh" "$MNT/root" "$MNT/boot"
 sync

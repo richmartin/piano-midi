@@ -209,6 +209,7 @@ done
 # NetworkManager needs a country for the WiFi radio to transmit.
 mkdir -p "$MNT/etc/NetworkManager/conf.d"
 printf '[device]\nwifi.scan-rand-mac-address=no\n' > "$MNT/etc/NetworkManager/conf.d/piano.conf"
+install -m 644 "$F/nm-powersave.conf" "$MNT/etc/NetworkManager/conf.d/piano-powersave.conf"
 # Raspberry Pi OS keeps WiFi rfkill-blocked until a country is set; the saved unblock would not
 # survive a read-only root, so unblock at every boot.
 install -m 644 "$F/piano-rfkill.service" "$MNT/etc/systemd/system/piano-rfkill.service"
