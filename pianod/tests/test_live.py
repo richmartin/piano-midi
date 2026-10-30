@@ -154,3 +154,11 @@ def test_the_band_and_the_library_take_turns(d):  # noqa: F811
     r = d.handle({"cmd": "live", "source": "saxy", "events": []})
     assert not r["ok"] and "Prelude" in r["error"]
     assert ok(d, "live", source="saxy", events=[], dryRun=True)["dryRun"]
+
+
+def test_a_tie_over_the_bar_line_is_left_alone(lv):
+    # Struck on the and-of-four, held through the downbeat; the next bar never strikes it again.
+    lv.add("saxy", [{"t": wall(lv, 1.5), "note": 60, "vel": 60, "dur": 1.0}])
+    lv.add("saxy", [{"t": wall(lv, 2.0), "note": 64, "vel": 60, "dur": 0.5}])
+    off = [p.time for p in lv.pending if p.kind == "off" and p.a == 60]
+    assert off == [pytest.approx(lv.fake.t + 2.5 - lv.cal.l_off(60))]
