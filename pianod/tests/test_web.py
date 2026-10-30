@@ -59,3 +59,27 @@ def test_events_start_with_the_state(base):
 def test_no_static_files_unless_asked(base):
     with pytest.raises(urllib.error.HTTPError):
         urllib.request.urlopen(f"{base}/index.html", timeout=5)
+
+
+def test_clock(base, d):  # noqa: F811
+    with urllib.request.urlopen(f"{base}/api/clock", timeout=5) as r:
+        assert abs(json.load(r)["t"] - d.live.now()) < 1
+
+
+def test_events_and_cancel(base, d):  # noqa: F811
+    t = d.live.now() + 5
+    status, r = post(base, "events", source="saxy", events=[{"t": t, "note": 60, "vel": 60, "dur": 1}])
+    assert status == 200 and r["ok"] and r["accepted"] == 1 and r["late"] == 0
+    assert post(base, "events/cancel", source="saxy")[1] == {"ok": True, "cancelled": 2}
+
+
+def test_saxy_may_call_from_the_browser(base):
+    req = urllib.request.Request(f"{base}/api/events", method="OPTIONS",
+                                 headers={"Origin": "https://saxy2.fam-mart.in"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.status == 204
+        assert r.headers["Access-Control-Allow-Origin"] == "https://saxy2.fam-mart.in"
+        assert "Content-Type" in r.headers["Access-Control-Allow-Headers"]
+    req = urllib.request.Request(f"{base}/api/clock", headers={"Origin": "https://elsewhere.example"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert "Access-Control-Allow-Origin" not in r.headers

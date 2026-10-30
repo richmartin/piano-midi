@@ -3,6 +3,12 @@
   GET  /api/state           the state, as the panel gets it
   GET  /api/events          server-sent events: every state push, and the keys as they move
   POST /api/<cmd>           a command, its arguments as a JSON object; the reply as the socket's
+  GET  /api/clock           {t}: pianod's clock, wall time in seconds, for POST /api/events
+  POST /api/events          {source, events: [{t, note, vel, dur} | {t, cc, value}], dryRun}
+                            -> {accepted, late, now, horizon}: notes to sound at t (live.py)
+  POST /api/events/cancel   {source}: everything pending from it, and its sounding notes, now
+
+Saxy (CORS_ORIGINS) may call it from the browser: its Band plays the piano part on the piano.
 
 Only the library and playback: WiFi, calibration and Performance mode stay on the panel, which
 is at the piano. LAN only, like everything else here; no authentication.
@@ -27,6 +33,10 @@ PORT = int(os.environ.get("PIANO_HTTP", "8080"))
 WEB_ROOT = os.environ.get("PIANO_WEB", "")
 COMMANDS = {"status", "play", "toggle", "pause", "resume", "stop", "next", "prev", "seek", "volume",
             "panic", "fav", "favourites", "queue", "shelves", "collection", "sync"}
+# POST paths that aren't a command's own name
+ROUTES = {"events": "live", "events/cancel": "live_cancel"}
+CORS_ORIGINS = set(filter(None, os.environ.get(
+    "PIANO_CORS", "https://saxy2.fam-mart.in").split(",")))
 HEARTBEAT = 15.0              # seconds: keeps proxies from closing a quiet event stream
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".json": "application/json", ".mid": "audio/midi",
@@ -41,9 +51,27 @@ def make_handler(d, data_dir: str):
         def log_message(self, fmt, *args):          # quiet: the journal is in RAM
             LOG.debug("http %s", fmt % args)
 
+        def _cors(self):
+            origin = self.headers.get("Origin")
+            if origin in CORS_ORIGINS:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+
+        def do_OPTIONS(self):                       # the browser's preflight for a JSON POST
+            self.send_response(204)
+            self._cors()
+            if self.headers.get("Origin") in CORS_ORIGINS:
+                self.send_header("Access-Control-Allow-Methods", "GET, POST")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+                self.send_header("Access-Control-Max-Age", "600")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def _json(self, obj, status=200):
             body = json.dumps(obj, separators=(",", ":")).encode()
             self.send_response(status)
+            self._cors()
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
@@ -52,6 +80,8 @@ def make_handler(d, data_dir: str):
 
         def do_GET(self):
             path = urlsplit(self.path).path
+            if path == "/api/clock":
+                return self._json({"t": d.live.now()})
             if path == "/api/state":
                 return self._json(d.state())
             if path == "/api/events":
@@ -63,7 +93,8 @@ def make_handler(d, data_dir: str):
         def do_POST(self):
             path = urlsplit(self.path).path
             cmd = path[len("/api/"):] if path.startswith("/api/") else ""
-            if cmd not in COMMANDS:
+            cmd = ROUTES.get(cmd, cmd)
+            if cmd not in COMMANDS and cmd not in ROUTES.values():
                 return self._json({"ok": False, "error": f"not here: {cmd!r}"}, 404)
             try:
                 n = int(self.headers.get("Content-Length") or 0)

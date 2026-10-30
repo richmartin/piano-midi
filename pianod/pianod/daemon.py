@@ -22,7 +22,7 @@ import socket
 import threading
 import time
 
-from . import calibrate, calibration, library, looper, midiio, network, player, smf, store, web
+from . import calibrate, calibration, library, live, looper, midiio, network, player, smf, store, web
 
 LOG = logging.getLogger("pianod")
 
@@ -111,6 +111,7 @@ class Pianod:
         self.player = player.Player(self.out, on_event=self.gate.sent, calibration=self.cal)
         self.player.on_ended = self._track_ended
         self.looper = looper.Looper(self.out, on_event=self.gate.sent, calibration=self.cal)
+        self.live = live.Live(self.out, self.cal, on_event=self.gate.sent)   # Saxy's Band
         self.mode = "library"
         self.queue: list[dict] = []          # [{id, title, composer}]
         self.index = -1
@@ -125,7 +126,7 @@ class Pianod:
         self.mic: dict = {"ok": False, "why": "not checked yet"}   # calibrate.probe_mic()
         st = store.read_json(f"{DATA}/state.json", {})
         if 1 <= st.get("volume", 0) <= 11:
-            self.player.volume = st["volume"]
+            self.player.volume = self.live.volume = st["volume"]
 
     def _save_state(self):
         store.write_json(f"{DATA}/state.json", {"volume": self.player.volume})
@@ -157,6 +158,7 @@ class Pianod:
                 "perf": self.looper.status(),
                 "calib": self.calib.status() if self.calib else None,
                 "mic": self.mic,
+                "live": self.live.status(),
             }
 
     def _push(self):
@@ -315,6 +317,7 @@ class Pianod:
                 return {}
             if cmd == "stop":
                 self.player.stop()
+                self.live.cancel()
                 return {}
             if cmd in ("next", "prev"):
                 self._require_library_mode()
@@ -332,14 +335,27 @@ class Pianod:
                 return {}
             if cmd == "volume":
                 self.player.set_volume(int(req["v"]))
+                self.live.volume = self.player.volume
                 self._save_state()
                 return {}
             if cmd == "panic":
                 if self._calibrating():
                     self.calib.rig.cancel.set()
                 self.player.pause()
+                self.live.cancel()
                 self.out.panic()
                 return {}
+
+            if cmd == "live":
+                # Timed notes from outside (Saxy's Band): see live.py.
+                dry = bool(req.get("dryRun"))
+                if not dry:
+                    self._require_library_mode(live_ok=True)
+                    if self.player.playing:
+                        raise ValueError(f"the piano is playing {self.player.title!r}")
+                return self.live.add(req.get("source"), req["events"], dry=dry)
+            if cmd == "live_cancel":
+                return self.live.cancel(req.get("source"))
 
             if cmd == "calibrate":
                 # Optional delay in minutes, to get out of the house first.
@@ -349,6 +365,7 @@ class Pianod:
                                      "needs one to hear the piano")
                 self.player.stop()
                 self.looper.clear()
+                self.live.cancel()
                 rig = calibrate.MidiRig(self.out, calibrate.Mic.find())
                 self.calib = calibrate.Calibrator(rig, delay=delay)
                 self.calib_summary = []
@@ -370,6 +387,7 @@ class Pianod:
                     raise ValueError(f"mode must be one of {', '.join(MODES)}")
                 if mode != self.mode:
                     self.player.stop()
+                    self.live.cancel()
                     self.looper.clear()
                     self.mode = mode
                 return {}
@@ -432,7 +450,7 @@ class Pianod:
                     c.phase, c.message = "failed", f"couldn't save: {e}"
                 else:
                     self.cal = calibration.load(f"{DATA}/calibration.json")
-                    self.player.cal = self.looper.cal = self.cal
+                    self.player.cal = self.looper.cal = self.live.cal = self.cal
             LOG.info("calibration %s %s", c.phase, c.message)
             for line in self.calib_summary:
                 LOG.info("calibration: %s", line)
@@ -450,9 +468,11 @@ class Pianod:
                     self._push()
             time.sleep(MIC_CHECK_EVERY)
 
-    def _require_library_mode(self):
+    def _require_library_mode(self, live_ok: bool = False):
         if self.mode != "library":
             raise ValueError("in performance mode (switch back to the library first)")
+        if not live_ok and self.live.active():
+            raise ValueError(f"the piano is playing {self.live.source}'s notes (stop first)")
 
     # --- MIDI in --------------------------------------------------------------------------
     def _midi_in_loop(self):

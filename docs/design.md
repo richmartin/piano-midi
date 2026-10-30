@@ -272,6 +272,32 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
 - pianod syncs from `http://piano.fam-mart.in` (live 2026-10-29: 600 of 609 files kept their ids,
   matched by content; 9 new).
 
+## Saxy's Band on the piano (live.py, 2026-10-30)
+
+Saxy (saxy2.fam-mart.in, the jazz sax course) can play its Band's pianist on this piano, with
+bass and drums from the tablet, and trade fours with a saxophone. The tablet sends; pianod plays.
+
+- `GET /api/clock` → `{t}`: pianod's clock, wall seconds. The tablet takes the offset from the
+  round trip with the smallest RTT and keeps its bar schedule in pianod's time.
+- `POST /api/events` `{source, events: [{t, note, vel, dur} | {t, cc, value}], dryRun}` →
+  `{accepted, late, now, horizon}`. `t` is when the note should *sound*; the playback model sends
+  it early by its strike time (up to LEAD, 0.25 s), so anything with `t` ≥ `horizon` is on time.
+  Saxy sends a bar ahead, two on WiFi. Late notes are dropped and counted, never played late; a
+  late pedal change goes at once (a dropped pedal-up would leave the dampers off).
+- `vel` is MIDI 1–127, capped at `PIANO_LIVE_CAP` (100) and mapped linearly onto sensor 33–91,
+  then pianod's volume, then the calibration. A note held into the next batch is cut short in time
+  for that batch to strike it again (mr).
+- `POST /api/events/cancel` `{source}` silences that source now: pending notes dropped, its
+  sounding notes off, its pedals up. The badge's Stop and Panic do the same for everyone.
+- One player at a time: events are refused while the library plays (or in Performance mode or a
+  calibration), and the library refuses to start while the Band has notes pending.
+- `dryRun`: the same validation and accounting, nothing sent, curfew or not. Evening tests use it.
+- `PIANO_CURFEW` (`HH:MM-HH:MM`, local, may cross midnight): inside it only dry runs are taken.
+  It applies to this endpoint only; the badge and the library are someone at the piano.
+- CORS for `PIANO_CORS` (`https://saxy2.fam-mart.in`), with Private Network Access on the
+  preflight. The tablet's page is https, so it calls https://piano.fam-mart.in/api/ (murdoch's
+  proxy), not the Pi's own http port.
+
 ## Later (server side, not in this repo yet)
 
 - Recordings synced up into the library as performers, smart-plug power orchestration via the
