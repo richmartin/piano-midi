@@ -600,7 +600,7 @@ def serve_panel(d: Pianod):
     while True:
         ports = sorted(glob.glob(SERIAL_GLOB))
         if not ports:
-            time.sleep(3)
+            time.sleep(0.5)                 # at boot the badge appears any moment; don't keep it waiting
             continue
         try:
             port = serial.Serial(ports[0], 115200, timeout=None)

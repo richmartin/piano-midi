@@ -15,16 +15,18 @@ die() { printf 'update-card.sh: %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run with sudo"
 [ "$(lsblk -dno RM "$DEV" | tr -d " ")" = 1 ] || die "$DEV isn't removable; refusing"
 ROOT=$(lsblk -lno PATH,LABEL "$DEV" | awk '$2=="rootfs"{print $1}')
+BOOT=$(lsblk -lno PATH,LABEL "$DEV" | awk '$2=="bootfs"{print $1}')
 DATA=$(lsblk -lno PATH,LABEL "$DEV" | awk '$2=="piano-data"{print $1}')
-[ -n "$ROOT" ] && [ -n "$DATA" ] || die "$DEV doesn't look like a PianoPi card (no rootfs / piano-data)"
+[ -n "$ROOT" ] && [ -n "$DATA" ] && [ -n "$BOOT" ] || die "$DEV doesn't look like a PianoPi card (no bootfs / rootfs / piano-data)"
 
 MNT=$(mktemp -d)
-cleanup() { umount "$MNT/data" 2>/dev/null || true; umount "$MNT/root" 2>/dev/null || true; rm -rf "$MNT"; }
+cleanup() { for m in data boot root; do umount "$MNT/$m" 2>/dev/null || true; done; rm -rf "$MNT"; }
 trap cleanup EXIT
-mkdir -p "$MNT/root" "$MNT/data"
-for p in "$ROOT" "$DATA"; do umount "$p" 2>/dev/null || true; done
+mkdir -p "$MNT/root" "$MNT/data" "$MNT/boot"
+for p in "$ROOT" "$DATA" "$BOOT"; do umount "$p" 2>/dev/null || true; done
 mount "$ROOT" "$MNT/root"
 mount "$DATA" "$MNT/data"
+mount "$BOOT" "$MNT/boot"
 [ -d "$MNT/root/opt/piano/pianod" ] || die "no /opt/piano/pianod on $ROOT"
 
 echo "was: $(tail -1 "$MNT/root/etc/pianopi-build")"
@@ -55,5 +57,7 @@ for f in "$MNT/data/nm"/*.nmconnection; do
     echo "PMF off for $(basename "$f" .nmconnection)"
   fi
 done
+# The boot-time savings (see fastboot.sh); doing them again is harmless.
+"$REPO/image/fastboot.sh" "$MNT/root" "$MNT/boot"
 sync
 echo "done: put the card back in the Pi"

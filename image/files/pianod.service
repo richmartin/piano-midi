@@ -14,6 +14,9 @@ RestartSec=3
 # pianod pings systemd every second; if it hangs, systemd kills and restarts it.
 WatchdogSec=30
 Environment=PYTHONUNBUFFERED=1
+# Compiled modules on the data partition: on the read-only root they'd be compiled again at
+# every boot.
+Environment=PYTHONPYCACHEPREFIX=/var/lib/piano/pycache
 # The DKW10's key sensors report its own playback on MIDI OUT (docs/design.md); the echo gate
 # drops it. Timing and velocity per key come from /var/lib/piano/calibration.json.
 Environment=PIANO_ECHO_MS=250

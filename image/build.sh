@@ -161,6 +161,7 @@ install -D -m 644 "$F/timesyncd.conf" "$MNT/etc/systemd/timesyncd.conf.d/piano.c
 install -D -m 644 "$F/timesyncd-after-data.conf" "$MNT/etc/systemd/system/systemd-timesyncd.service.d/piano.conf"
 grep -q overlayroot= "$MNT/boot/firmware/cmdline.txt" || sed -i 's/^/overlayroot=tmpfs:recurse=0 /' "$MNT/boot/firmware/cmdline.txt"
 in_pi update-initramfs -u -k all
+"$HERE/fastboot.sh" "$MNT" "$MNT/boot/firmware"
 
 # The data partition's starting contents. The library mirror starts empty: the first
 # `piano sync` (or the badge's "Update the library") fills it from the server.
