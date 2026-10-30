@@ -251,7 +251,8 @@ class Pianod:
                                                         for w in self.lib.pianist_works(req["slug"])], WORK_ROW))
             if cmd == "collection":
                 return page(req, "works", compact(req, [brief(w, composer=True)
-                                                        for w in self.lib.collection(req["slug"])], WORK_ROW))
+                                                        for w in self.lib.collection(req.get("collection") or req["slug"])],
+                                                    WORK_ROW))
             if cmd == "favourites":
                 return page(req, "works", compact(req, [brief(w, composer=True)
                                                         for w in self._favourite_works()], WORK_ROW))

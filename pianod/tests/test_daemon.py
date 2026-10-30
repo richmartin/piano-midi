@@ -251,3 +251,27 @@ def test_the_panel_can_log(d, caplog):
     with caplog.at_level("WARNING", logger="pianod"):
         assert d.handle({"cmd": "log", "text": "Traceback: boom"})["ok"]
     assert "panel: Traceback: boom" in caplog.text
+
+
+def test_every_list_the_panel_asks_for_as_it_asks(d):
+    """The panel's requests exactly as badge/CIRCUITPY/app.py sends them (fetch: paged, compact)."""
+    lib = json.load(open(f"{daemon.DATA}/library.json"))
+    lib["composers"][0]["works"][0]["title"] = "Sonata in D"        # so there's a collection
+    open(f"{daemon.DATA}/library.json", "w").write(json.dumps(lib))
+    d.lib.load()
+    assert ok(d, "shelves")["collections"]
+    def fetch(cmd, key, **kw):
+        items, offset = [], 0
+        while offset is not None:
+            r = ok(d, cmd, offset=offset, compact=1, **kw)
+            items += r[key]
+            offset = r.get("next")
+        return items
+    composers = fetch("composers", "composers")
+    assert fetch("works", "works", slug=composers[0][0])
+    for p in fetch("pianists", "pianists"):
+        fetch("pianist_works", "works", slug=p[0])
+    for c in ok(d, "shelves")["collections"]:
+        assert fetch("collection", "works", collection=c["slug"])
+    fetch("favourites", "works")
+    fetch("recordings", "works")
