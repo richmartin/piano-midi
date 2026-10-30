@@ -57,6 +57,7 @@ for f in "$MNT/data/nm"/*.nmconnection; do
     echo "PMF off for $(basename "$f" .nmconnection)"
   fi
 done
+install -m 440 "$REPO/image/files/sudoers-piano" "$MNT/root/etc/sudoers.d/020_piano"
 # The boot-time savings (see fastboot.sh); doing them again is harmless.
 "$REPO/image/fastboot.sh" "$MNT/root" "$MNT/boot"
 sync

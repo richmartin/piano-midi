@@ -1,0 +1,3 @@
+# rich runs sudo without a password on the PianoPi (Rich's decision, 2026-10-30): SSH accepts only
+# the keys of his own machines, and updates over SSH (piano-maint, copying pianod) need root.
+rich ALL=(ALL) NOPASSWD: ALL

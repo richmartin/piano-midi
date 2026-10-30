@@ -135,6 +135,7 @@ install -d "$MNT/mnt/circuitpy"
 install -d -m 700 -o "$UIDN" -g "$GIDN" "$MNT/home/$USERNAME/.ssh"
 for k in "${PUBKEYS[@]}"; do cat "$PUBKEYS_DIR/$k.pub"; done > "$MNT/home/$USERNAME/.ssh/authorized_keys"
 chown "$UIDN:$GIDN" "$MNT/home/$USERNAME/.ssh/authorized_keys"; chmod 600 "$MNT/home/$USERNAME/.ssh/authorized_keys"
+install -m 440 "$HERE/files/sudoers-piano" "$MNT/etc/sudoers.d/020_piano"
 
 # Generated once, here: on a read-only root they would be new on every boot.
 rm -f "$MNT"/etc/ssh/ssh_host_*
