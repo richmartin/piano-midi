@@ -40,6 +40,7 @@ B, A, START, SELECT, RIGHT, DOWN, UP, LEFT = range(8)
 A_HELD = 100                     # A held down for a while: star
 HOLD_S = 0.6
 LINK = usb_cdc.data
+BUF_SIZE = 4608                  # pianod keeps every line under 4 KB
 IDLE_DIM_S = 60
 
 
@@ -48,7 +49,10 @@ class Link:
     """Requests out, replies and pushes in. Never blocks the UI for long."""
 
     def __init__(self):
-        self.buf = b""
+        # One buffer for the life of the panel: growing a bytes per read (buf += ...) wanted a
+        # fresh 2-4 KB block every time, and after hours of pushes the heap had none left.
+        self.buf = bytearray(BUF_SIZE)
+        self.n = 0                   # bytes in buf
         self.next_id = 1
         self.replies = {}
         self.state = None
@@ -69,26 +73,39 @@ class Link:
     def poll(self):
         if LINK is None:
             return
-        n = LINK.in_waiting
-        if n:
-            self.buf += LINK.read(n)
-        while b"\n" in self.buf:
-            line, self.buf = self.buf.split(b"\n", 1)
-            try:
-                msg = json.loads(line)
-            except ValueError:
-                continue
-            self.last_heard = time.monotonic()
-            kind = msg.get("type")
-            if kind == "state":
-                self.state = msg
-            elif kind == "keys":
-                if self.keys is not None:
-                    self.keys.press(msg.get("on", ()), msg.get("off", ()))
-            elif "rid" in msg:
-                self.replies[msg["rid"]] = msg
-        if len(self.buf) > 4096:    # garbage: start afresh
-            self.buf = b""
+        mv = memoryview(self.buf)
+        while LINK.in_waiting:
+            if self.n == BUF_SIZE:   # a line longer than any pianod sends: garbage, start afresh
+                self.n = 0
+            got = LINK.readinto(mv[self.n:])
+            if not got:
+                return
+            self.n += got
+            start = 0
+            while True:
+                end = self.buf.find(b"\n", start, self.n)
+                if end < 0:
+                    break
+                self._line(bytes(mv[start:end]))
+                start = end + 1
+            if start:                # keep the partial line, at the front
+                mv[:self.n - start] = mv[start:self.n]
+                self.n -= start
+
+    def _line(self, line):
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return
+        self.last_heard = time.monotonic()
+        kind = msg.get("type")
+        if kind == "state":
+            self.state = msg
+        elif kind == "keys":
+            if self.keys is not None:
+                self.keys.press(msg.get("on", ()), msg.get("off", ()))
+        elif "rid" in msg:
+            self.replies[msg["rid"]] = msg
 
     def connected(self):
         return time.monotonic() - self.last_heard < 15
