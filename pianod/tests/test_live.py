@@ -162,3 +162,47 @@ def test_a_tie_over_the_bar_line_is_left_alone(lv):
     lv.add("saxy", [{"t": wall(lv, 2.0), "note": 64, "vel": 60, "dur": 0.5}])
     off = [p.time for p in lv.pending if p.kind == "off" and p.a == 60]
     assert off == [pytest.approx(lv.fake.t + 2.5 - lv.cal.l_off(60))]
+
+
+def test_a_sounding_note_whose_off_was_lost_is_auto_released(lv):
+    """The 2026-10-31 13:10 incident: pending drained to nothing, a note stayed sounding."""
+    lv.add("saxy", [{"t": wall(lv, 1.0), "note": 60, "vel": 80, "dur": 0.5}])
+    at(lv, 1.0)                                       # the on is out, the off still pending
+    assert [s[0] for s in lv.out.sent] == ["on"]
+    with lv.cond:                                     # lose the off, as the incident did
+        lv.pending = [p for p in lv.pending if p.kind != "off"]
+    at(lv, 1.0 + live.MAX_HOLD + live.GRACE + 1)
+    wait_for(lambda: ("off", 60) in lv.out.sent)
+    assert ("off", 60) in lv.out.sent
+    assert lv.status() is None                        # released, drained, counts reset
+
+
+def test_a_sounding_note_with_its_off_still_coming_is_left_alone(lv):
+    lv.add("saxy", [{"t": wall(lv, 1.0), "note": 60, "vel": 80, "dur": 0.5}])
+    at(lv, 1.0)
+    with lv.cond:
+        before = list(lv.out.sent)
+        lv._sweep(lv.fake.t + live.MAX_HOLD + live.GRACE + 1)   # overdue by age, but its off is pending
+    assert lv.out.sent == before
+
+
+def test_pedals_left_down_with_nothing_more_coming_are_released(lv):
+    lv.add("saxy", [{"t": wall(lv, 0.5), "cc": 64, "value": 127},
+                    {"t": wall(lv, 1.0), "note": 60, "vel": 80, "dur": 0.5}])
+    at(lv, 3.0)                                       # all sent; sustain is down, nothing pending
+    assert not any(s == ("cc", 64, 0) for s in lv.out.sent)
+    at(lv, 3.0 + live.MAX_HOLD + live.GRACE + 1)
+    wait_for(lambda: ("cc", 64, 0) in lv.out.sent)
+    assert ("cc", 64, 0) in lv.out.sent
+
+
+def test_accepted_non_dry_batches_are_audited_dry_ones_not(lv, caplog):
+    import logging
+    with caplog.at_level(logging.INFO, logger="pianod.audit"):
+        lv.add("saxy", [{"t": wall(lv, 1.0), "note": 60, "vel": 80, "dur": 0.5}], dry=True)
+        assert not caplog.records
+        lv.add("saxy", [{"t": wall(lv, 1.0), "note": 60, "vel": 80, "dur": 0.5}])
+    audit = [r for r in caplog.records if r.name == "pianod.audit"]
+    assert len(audit) == 1
+    msg = audit[0].getMessage()
+    assert "saxy" in msg and "1 accepted" in msg and "0 late" in msg

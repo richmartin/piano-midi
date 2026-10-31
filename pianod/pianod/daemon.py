@@ -673,19 +673,29 @@ def _brief_req(req: dict) -> str:
 
 
 def _remote_log(target: str) -> None:
-    """Copy warnings and errors to a syslog receiver on the LAN, "host:port" (UDP)."""
+    """Copy warnings and errors to a syslog receiver on the LAN, "host:port" (UDP) — and the
+    live audit ("pianod.audit", one line per accepted non-dry batch) at INFO: the record that
+    something moved hammers has to outlive the Pi's in-RAM journal."""
     import logging.handlers
-    host, _, port = target.rpartition(":")
-    try:
+
+    def handler():
         h = logging.handlers.SysLogHandler(address=(host, int(port)),
                                            facility=logging.handlers.SysLogHandler.LOG_LOCAL0)
+        h.ident = "pianod: "                # the syslog tag the receiver files by
+        h.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        return h
+
+    host, _, port = target.rpartition(":")
+    try:
+        root = handler()
+        audit = handler()
     except (OSError, ValueError) as e:
         LOG.warning("no remote log at %s: %s", target, e)
         return
-    h.ident = "pianod: "                    # the syslog tag the receiver files by
-    h.setLevel(logging.WARNING)
-    h.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    logging.getLogger().addHandler(h)
+    root.setLevel(logging.WARNING)
+    logging.getLogger().addHandler(root)
+    audit.setLevel(logging.INFO)            # the root handler's WARNING filter would drop these
+    logging.getLogger("pianod.audit").addHandler(audit)
 
 
 def main():

@@ -13,12 +13,20 @@ velocity per key, sent early by the strike time, held long enough to land.
 Velocities are MIDI 1-127, capped at CAP, onto the piano's usable span (sensor 33-91, the
 calibration does the rest) and scaled by pianod's volume. Inside CURFEW nothing is played, only
 dry runs: scheduled and counted, no solenoid moves.
+
+Defence in depth, both learned on 2026-10-31: every accepted non-dry batch is audited (the
+"pianod.audit" logger, which daemon._remote_log copies to murdoch at INFO — refusals were logged
+while the thing that moved hammers was invisible), and no solenoid stays energised with nothing
+left to release it — a sounding note past MAX_HOLD with no off pending, or a pedal down long
+after the last send, is released and logged (a client that disappeared without /events/cancel
+left a key held down for two minutes).
 """
 
 from __future__ import annotations
 
 import bisect
 import itertools
+import logging
 import os
 import threading
 import time
@@ -27,6 +35,9 @@ from dataclasses import dataclass, field
 from .calibration import LEAD
 from .smf import PEDALS, Event
 
+LOG = logging.getLogger("pianod")
+AUDIT = logging.getLogger("pianod.audit")
+
 CAP = int(os.environ.get("PIANO_LIVE_CAP", "100"))           # the loudest velocity taken, of 127
 CURFEW = os.environ.get("PIANO_CURFEW", "")                  # "20:00-08:00"; "" = none
 AHEAD = 60.0                   # the furthest ahead a note may be sent, seconds
@@ -34,6 +45,7 @@ MAX_EVENTS = 4000              # in one request
 MAX_HOLD = 30.0                # the longest note, seconds
 FLOOR, TOP = 33.0, 91.0        # sensor velocity: the piano's softest, and where 100 sent lands
 TICK = 0.05
+GRACE = 2.0                    # slack on MAX_HOLD before a stuck note is auto-released
 
 
 def in_curfew(spec: str, now: float | None = None) -> bool:
@@ -68,7 +80,8 @@ class Live:
         self.volume = 8
         self.cond = threading.Condition()
         self.pending: list[_Out] = []
-        self.sounding: dict[int, str] = {}       # key -> source, its on sent and off not yet
+        self.sounding: dict[int, tuple[str, float]] = {}   # key -> (source, struck at), monotonic
+        self.last_send = clock()                 # when anything last went to the piano
         self.pedals: dict[str, set] = {}         # source -> pedals it has down (as sent)
         self.pedal_sound: dict[str, bool] = {}   # source -> sustain down at its last sound time
         self.counts = {"accepted": 0, "late": 0}
@@ -106,12 +119,14 @@ class Live:
         wall, mono = self.wall(), self.clock()
         to_mono = mono - wall
         ev: list[Event] = []
+        ts: list[float] = []
         for e in events:
             if not isinstance(e, dict):
                 raise ValueError("each event is an object")
             t = float(e["t"])
             if not wall - AHEAD < t < wall + AHEAD:
                 raise ValueError(f"t={t} is not within {AHEAD:.0f} s of now ({wall:.3f})")
+            ts.append(t)
             if "cc" in e:
                 cc, value = int(e["cc"]), int(e["value"])
                 if cc not in PEDALS or not 0 <= value <= 127:
@@ -155,6 +170,10 @@ class Live:
                 self.counts["accepted"] += accepted
                 self.counts["late"] += late
                 self.cond.notify_all()
+                if accepted or late:
+                    # The one record that something is about to move hammers (murdoch keeps it).
+                    AUDIT.info("live: %s sent %d events, %d accepted, %d late, t %.3f..%.3f",
+                               source, len(events), accepted, late, min(ts), max(ts))
             return {"accepted": accepted, "late": late, "now": round(self.wall(), 4),
                     "horizon": round(self.wall() + LEAD, 4), "dryRun": dry}
 
@@ -182,7 +201,7 @@ class Live:
             keep = [p for p in self.pending if source is not None and p.source != source]
             n = len(self.pending) - len(keep)
             self.pending = keep
-            for key, src in list(self.sounding.items()):
+            for key, (src, _struck) in list(self.sounding.items()):
                 if source is None or src == source:
                     self.out.note_off(key)
                     del self.sounding[key]
@@ -202,9 +221,10 @@ class Live:
 
     # --- out ---------------------------------------------------------------------------------
     def _send(self, p: _Out) -> None:
+        self.last_send = self.clock()
         if p.kind == "on":
             self.out.note_on(p.a, p.b)
-            self.sounding[p.a] = p.source
+            self.sounding[p.a] = (p.source, self.last_send)
             if self.on_event:
                 self.on_event(p.a)
         elif p.kind == "off":
@@ -215,16 +235,44 @@ class Live:
             down = self.pedals.setdefault(p.source, set())
             (down.add if p.b >= 64 else down.discard)(p.a)
 
+    def _pedals_down(self) -> bool:
+        return any(self.pedals.values())
+
+    def _sweep(self, now: float) -> None:
+        """No solenoid stays energised with nothing left to release it (the 13:10 incident:
+        a sounding note whose off never made it into pending, held until someone cancelled)."""
+        overdue = [k for k, (_src, struck) in self.sounding.items() if now - struck > MAX_HOLD + GRACE]
+        if overdue:
+            has_off = {p.a for p in self.pending if p.kind == "off"}
+            for k in overdue:
+                if k in has_off:                 # its off is coming; let it
+                    continue
+                src, struck = self.sounding.pop(k)
+                self.out.note_off(k)
+                LOG.warning("auto-released note %d from %s: held %.0f s with no off pending",
+                            k, src, now - struck)
+        if not (self.pending or self.sounding) and now - self.last_send > MAX_HOLD + GRACE:
+            for src, down in self.pedals.items():
+                if down:
+                    for cc in sorted(down):
+                        self.out.cc(cc, 0)
+                    LOG.warning("auto-released pedals %s from %s: nothing sent for %.0f s",
+                                sorted(down), src, now - self.last_send)
+                    down.clear()
+
     def _run(self) -> None:
         while True:
             with self.cond:
-                while not self.pending:
+                while not (self.pending or self.sounding or self._pedals_down()):
                     self.cond.wait()
                 now = self.clock()
                 while self.pending and self.pending[0].time <= now:
                     self._send(self.pending.pop(0))
+                self._sweep(now)
                 if not (self.pending or self.sounding):
                     self.source = None
                     self.counts = {"accepted": 0, "late": 0}
                 if self.pending:
                     self.cond.wait(min(TICK, max(0.001, self.pending[0].time - self.clock())))
+                elif self.sounding or self._pedals_down():
+                    self.cond.wait(1.0)          # between sweeps
