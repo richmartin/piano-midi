@@ -10,6 +10,21 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import mido
+from mido.midifiles import meta as _meta
+
+# The piano has no use for key signatures, and some old sequencer exports write ones mido can't
+# decode (mode 255): read those as C rather than refuse the whole file.
+_strict_key = _meta.MetaSpec_key_signature.decode
+
+
+def _lenient_key(self, message, data):
+    try:
+        _strict_key(self, message, data)
+    except _meta.KeySignatureError:
+        message.key = "C"
+
+
+_meta.MetaSpec_key_signature.decode = _lenient_key
 
 PEDALS = (64, 66, 67)
 _TICKS_PER_BEAT = 480

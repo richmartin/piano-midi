@@ -59,3 +59,21 @@ def test_real_library_file_loads():
     assert duration > 10
     assert any(e.kind == "on" for e in events)
     assert all(events[i].time <= events[i + 1].time for i in range(len(events) - 1))
+
+
+def test_an_undecodable_key_signature_still_plays(tmp_path):
+    # BALLADE2.MID, FEUX.MID, MAZEPPA.MID: "Could not decode key with N flats and mode 255"
+    import mido
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    mid.tracks.append(track)
+    track.append(mido.MetaMessage("key_signature", key="Eb", time=0))
+    track.append(mido.Message("note_on", note=60, velocity=70, time=0))
+    track.append(mido.Message("note_off", note=60, time=480))
+    path = tmp_path / "bad-key.mid"
+    mid.save(str(path))
+    raw = path.read_bytes()
+    i = raw.index(b"\xff\x59\x02")
+    path.write_bytes(raw[:i + 4] + b"\xff" + raw[i + 5:])        # mode 255
+    events, _ = smf.load(str(path))
+    assert [e.kind for e in events] == ["on", "off"]

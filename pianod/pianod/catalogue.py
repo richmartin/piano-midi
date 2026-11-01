@@ -74,7 +74,8 @@ _NICKNAMES = {_key(k): v for k, v in D.NICKNAMES.items()}
 
 
 def find_composer(name: str) -> str | None:
-    return _COMPOSER_INDEX.get(_key(name))
+    """By any spelling, with or without dates: "Niemann, Walter (1876 -1953)" is Niemann."""
+    return _COMPOSER_INDEX.get(_key(name)) or _COMPOSER_INDEX.get(_key(re.sub(r"\(.*?\)", "", name)))
 
 
 def _synth_composer(raw: str) -> dict:

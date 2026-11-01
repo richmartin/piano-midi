@@ -27,6 +27,9 @@ import sys
 
 import requests
 import wikipedia
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "pianod"))
+from pianod import catalogue, smf  # noqa: E402
 from datetime import datetime
 
 # --- Configuration ---
@@ -368,9 +371,18 @@ class MidiLibraryGenerator:
         return {f: known[r] for f, r in zip(files, rel)}
 
     def _find_midi_files(self):
-        """Finds all.mid files in the input directory."""
+        """Every MIDI file under the input directory: .mid or .midi, any case (one source's are
+        all .MID), and only real ones (a file can be called .mid and not be MIDI)."""
         logging.info(f"Scanning for MIDI files in {self.input_dir}...")
-        files = list(self.input_dir.rglob("*.mid"))
+        files = []
+        for f in self.input_dir.rglob("*"):
+            if not f.is_file() or f.suffix.lower() not in (".mid", ".midi"):
+                continue
+            with open(f, "rb") as fh:
+                if fh.read(4) != b"MThd":
+                    logging.warning(f"Not a MIDI file, left out: {f}")
+                    continue
+            files.append(f)
         files.sort() # Ensure stable order for ID generation
         logging.info(f"Found {len(files)} MIDI files.")
         return files
@@ -402,6 +414,14 @@ class MidiLibraryGenerator:
         # Fallbacks
         if 'work' not in metadata:
             metadata['work'] = filename_stem # Use the filename as a last resort
+        # A filename's composer that nobody knows ("MOZ_331A", or none at all) yields to the
+        # folder it is filed in, when that is a composer ("Mozart/", "Rachman/").
+        folder = file_path.parent.name
+        if (catalogue.find_composer(folder)
+                and not any(catalogue.find_composer(n)
+                            for n in self._resolve_composers(metadata.get('composer', ''))
+                            if n)):
+            metadata['composer'] = folder
         if 'composer' not in metadata:
             metadata['composer'] = "Unknown Composer"
         if 'performer' not in metadata:
@@ -608,8 +628,9 @@ class MidiLibraryGenerator:
         else:
             # 2. If no alias, check if it's a hyphenated name (e.g. "Alabieff-Liszt")
             # But be careful not to split double-barrelled surnames if they exist in aliases
-            if '-' in raw_name:
-                names_to_process = [part.strip() for part in raw_name.split('-')]
+            # (not a dash in dates: "Niemann, Walter (1876 -1953)")
+            if '-' in re.sub(r'\(.*?\)', '', raw_name):
+                names_to_process = [part.strip() for part in re.split(r'-(?![^(]*\))', raw_name)]
             else:
                 names_to_process = [raw_name]
 
@@ -691,6 +712,7 @@ class MidiLibraryGenerator:
 
                     model['composers'][composer_slug] = {
                         "name": display_name, # Use formatted name for UI
+                        "source": composer_name,  # as spelt: catalogue.tidy names it
                         "slug": composer_slug,
                         "page_url": f"/composers/{composer_slug}.html",
                         "works": [],
@@ -789,7 +811,7 @@ class MidiLibraryGenerator:
         
         for comp in sorted_composers:
             comp_entry = {
-                "name": comp['name'],
+                "name": comp['source'],
                 "slug": comp['slug'],
                 "works": []
             }
@@ -808,14 +830,12 @@ class MidiLibraryGenerator:
         # The catalogue tidied (pianod/pianod/catalogue.py): canonical composers with dates and
         # eras, the pianists and roll systems in the roll titles, clean titles, lengths. It keeps
         # every v1 field, so older players still read it.
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "pianod"))
-        from pianod import catalogue, smf
-
         def duration(work_id):
             try:
                 events, _ = smf.load(str(self.midi_files_dir / f"{work_id}.mid"))
                 return round(events[-1].time, 1) if events else None
-            except (OSError, ValueError, IndexError, EOFError):
+            except Exception as e:      # one damaged file is a missing length, not a failed build
+                logging.warning(f"No length for {work_id}: {e}")
                 return None
 
         library_data = catalogue.tidy(library_data, duration=duration)
