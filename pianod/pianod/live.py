@@ -24,7 +24,6 @@ left a key held down for two minutes).
 
 from __future__ import annotations
 
-import bisect
 import itertools
 import logging
 import os
@@ -32,7 +31,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from .calibration import LEAD
+from .calibration import _TINY, LEAD
 from .smf import PEDALS, Event
 
 LOG = logging.getLogger("pianod")
@@ -67,6 +66,21 @@ class _Out:
     a: int = field(compare=False)
     b: int = field(compare=False)
     source: str = field(compare=False)
+
+
+def _pairs(items) -> list[list]:
+    """One key's ons and offs, in send order, as [on, off] notes. An off with no on before it
+    belongs to the note already sounding (its on was sent): [None, off]. An on with no off yet
+    (not possible from render, which always closes a note) gets None."""
+    notes: list[list] = []
+    for it in sorted(items):
+        if it.kind == "on":
+            notes.append([it, None])
+        elif notes and notes[-1][1] is None and notes[-1][0] is not None:
+            notes[-1][1] = it
+        else:
+            notes.append([None, it])
+    return notes
 
 
 class Live:
@@ -178,22 +192,31 @@ class Live:
                     "horizon": round(self.wall() + LEAD, 4), "dryRun": dry}
 
     def _merge(self, outs, source, now):
-        # A key still held from an earlier batch has to come up mr before this batch strikes it.
-        first_on: dict[int, float] = {}
-        for s in outs:
-            if s.kind == "on" and s.a not in first_on:
-                first_on[s.a] = s.time
-        moved = False
-        for p in self.pending:
-            if p.kind == "off" and p.a in first_on and p.time > first_on[p.a] - self.cal.mr(p.a):
-                p.time = max(now, first_on[p.a] - self.cal.mr(p.a))
-                moved = True
-        if moved:
-            self.pending.sort()
-        for s in outs:
-            order = 1 if s.kind == "on" else 0
-            bisect.insort(self.pending, _Out(max(s.time, now), order, next(self._seq),
-                                             s.kind, s.a, s.b, source))
+        """Add a rendered batch to what's pending, keeping every key's notes in order.
+
+        A batch can strike a key before or after notes already pending on it (Saxy sends a
+        bar's body 4 s ahead and its tail 0.3 s ahead), so per key all its notes, pending and
+        new, are put in strike order and each comes up mr before the next strikes. Moving only
+        the pending offs (as this once did) could put a later note's off before an earlier
+        note's strike: off, on, off, on, and the key stayed down (2026-10-31 13:10)."""
+        new = [_Out(max(s.time, now), 1 if s.kind == "on" else 0, next(self._seq),
+                    s.kind, s.a, s.b, source) for s in outs]
+        for key in {o.a for o in new if o.kind != "cc"}:
+            notes = _pairs(p for p in self.pending if p.kind != "cc" and p.a == key)
+            notes += _pairs(o for o in new if o.kind != "cc" and o.a == key)
+            # The one already sounding (no on pending) first, then by strike time.
+            notes.sort(key=lambda n: -1e18 if n[0] is None else n[0].time)
+            mr = self.cal.mr(key)
+            for (a_on, a_off), (b_on, b_off) in zip(notes, notes[1:]):
+                if a_off is None:
+                    continue
+                floor = now if a_on is None else a_on.time + _TINY
+                a_off.time = max(floor, min(a_off.time, b_on.time - mr))
+                b_on.time = max(b_on.time, a_off.time + _TINY)
+                if b_off is not None:
+                    b_off.time = max(b_off.time, b_on.time + _TINY)
+        self.pending.extend(new)
+        self.pending.sort()
 
     def cancel(self, source: str | None = None) -> dict:
         """Everything pending from source (None: from anyone), and silence what it sounds."""

@@ -206,3 +206,14 @@ def test_accepted_non_dry_batches_are_audited_dry_ones_not(lv, caplog):
     assert len(audit) == 1
     msg = audit[0].getMessage()
     assert "saxy" in msg and "1 accepted" in msg and "0 late" in msg
+
+
+def test_a_tail_that_strikes_a_key_before_its_body_does_leaves_nothing_down(lv):
+    # 2026-10-31 13:10: bar n+1's body (4 s ahead) had F on its downbeat; bar n's tail (0.3 s
+    # ahead) then struck F on the and-of-four, briefly. Moving only pending offs put the body's
+    # off before the tail's strike, and F stayed down after the downbeat.
+    lv.add("saxy", [{"t": wall(lv, 2.0), "note": 65, "vel": 90, "dur": 0.4}])      # body
+    lv.add("saxy", [{"t": wall(lv, 1.75), "note": 65, "vel": 30, "dur": 0.1}])     # tail
+    at(lv, 4.0)
+    assert [s[0] for s in lv.out.sent if s[1] == 65] == ["on", "off", "on", "off"]
+    assert lv.status() is None and lv.sounding == {}
