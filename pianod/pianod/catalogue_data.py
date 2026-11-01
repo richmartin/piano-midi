@@ -16,6 +16,7 @@ C = dict  # brevity
 COMPOSERS = {
     "alyabyev": C(name="Alexander Alyabyev", first="Alexander", short="Alyabyev", born=1787, died=1851, era="romantic", aliases=["Alabieff", "Alabieff, Alexander", "Alabiev"]),
     "albeniz": C(name="Isaac Albéniz", first="Isaac", short="Albéniz", born=1860, died=1909, era="romantic", aliases=[]),
+    "alkan": C(name="Charles-Valentin Alkan", first="Charles-Valentin", short="Alkan", born=1813, died=1888, era="romantic", aliases=["Alkan, Charles-Valentin", "Alkan, Charles Valentin"]),
     "arensky": C(name="Anton Arensky", first="Anton", short="Arensky", born=1861, died=1906, era="romantic", aliases=[]),
     "bach-js": C(name="Johann Sebastian Bach", first="Johann Sebastian", short="J.S. Bach", born=1685, died=1750, era="baroque", opus=False, sort="bach johann sebastian", aliases=["Bach", "Bach, J.S.", "Bach, JS", "J.S. Bach"]),
     "bach-wf": C(name="Wilhelm Friedemann Bach", first="Wilhelm Friedemann", short="W.F. Bach", born=1710, died=1784, era="baroque", opus=False, sort="bach wilhelm friedemann", aliases=["Bach, W.F", "Bach, W.F.", "W.F. Bach"]),
@@ -57,6 +58,7 @@ COMPOSERS = {
     "friedman": C(name="Ignaz Friedman", first="Ignaz", short="Friedman", born=1882, died=1948, era="romantic", aliases=[]),
     "friml": C(name="Rudolf Friml", first="Rudolf", short="Friml", born=1879, died=1972, era="modern", aliases=[]),
     "gartner": C(name="Eduard Gärtner", first="Eduard", short="Gärtner", born=1862, died=1918, era="romantic", aliases=["Gaertner"]),
+    "gershwin": C(name="George Gershwin", first="George", short="Gershwin", born=1898, died=1937, era="modern", aliases=["Gershwin, George"]),
     "glazunov": C(name="Alexander Glazunov", first="Alexander", short="Glazunov", born=1865, died=1936, era="romantic", aliases=["Glazounov, Alexander", "Glazounov"]),
     "glinka": C(name="Mikhail Glinka", first="Mikhail", short="Glinka", born=1804, died=1857, era="romantic", aliases=[]),
     "godard": C(name="Benjamin Godard", first="Benjamin", short="Godard", born=1849, died=1895, era="romantic", aliases=[]),

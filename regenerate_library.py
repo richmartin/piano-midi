@@ -25,6 +25,7 @@ import time
 import unicodedata
 import sys
 
+import mido
 import requests
 import wikipedia
 
@@ -274,6 +275,29 @@ class WikipediaClient:
         return entity_data
 
 
+def embedded_names(path):
+    """(composer, title) from a MIDI file's own track names and text events, either None.
+    The composer only if the catalogue knows them; the title is the first other line that
+    isn't about the piano or the performer."""
+    try:
+        texts = [(m.name if m.type == "track_name" else m.text).strip() for t in mido.MidiFile(str(path)).tracks for m in t[:40]
+                 if m.is_meta and m.type in ("track_name", "text")]
+    except Exception:
+        return None, None
+    composer = title = None
+    for text in texts[:20]:
+        for piece in re.split(r'\s*[:/\u2013\u2014]\s*|\s+-\s+', text):
+            piece = re.sub(r'^(composed by|by|sir)\s+', '', piece.strip(), flags=re.I)
+            if len(piece) < 3:
+                continue
+            if catalogue.find_composer(piece):
+                composer = composer or piece
+            elif (title is None and not re.search(r'piano|by\b|\(c\)|copyright|http', piece, re.I)
+                  and re.fullmatch(r"[\w .,'&()!?-]+", piece) and re.search(r'[a-z]', piece)):
+                title = piece
+    return composer, title
+
+
 class MidiLibraryGenerator:
     """
     Main class to orchestrate the static site generation.
@@ -422,6 +446,18 @@ class MidiLibraryGenerator:
                             for n in self._resolve_composers(metadata.get('composer', ''))
                             if n)):
             metadata['composer'] = folder
+        # Still nobody known, or a title that is only a code ("CDELUNE"): what the file says
+        # about itself ("Clair De Lune" / "Claude Debussy"), but only a composer the catalogue
+        # knows, so a track called "Piano High" names nobody.
+        known = any(catalogue.find_composer(n)
+                    for n in self._resolve_composers(metadata.get('composer', '')) if n)
+        coded = not re.search(r'[a-z]', metadata['work'])
+        if not known or coded:
+            composer, title = embedded_names(file_path)
+            if composer and not known:
+                metadata['composer'] = composer
+            if title and coded:
+                metadata['work'] = title
         if 'composer' not in metadata:
             metadata['composer'] = "Unknown Composer"
         if 'performer' not in metadata:
