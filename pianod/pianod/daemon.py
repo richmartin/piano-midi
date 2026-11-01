@@ -22,7 +22,8 @@ import socket
 import threading
 import time
 
-from . import calibrate, calibration, library, live, looper, midiio, network, player, smf, store, web
+from . import (calibrate, calibration, library, live, looper, midiio, network, observe, player,
+               smf, store, web)
 
 LOG = logging.getLogger("pianod")
 
@@ -112,6 +113,8 @@ class Pianod:
         self.player.on_ended = self._track_ended
         self.looper = looper.Looper(self.out, on_event=self.gate.sent, calibration=self.cal)
         self.live = live.Live(self.out, self.cal, on_event=self.gate.sent)   # Saxy's Band
+        self.observer = observe.Observer(DATA, self.cal)
+        self.out.observer = self.observer
         self.mode = "library"
         self.queue: list[dict] = []          # [{id, title, composer}]
         self.index = -1
@@ -175,8 +178,9 @@ class Pianod:
         work = self.lib.work(cur["id"])
         events, duration = smf.load(self.lib.path(work))
         # Our own takes are already in the piano's sensor units: no fitting.
-        self.player.load(events, duration, cur["title"],
-                         fit=not work["url"].startswith("/recordings/"))
+        take = work["url"].startswith("/recordings/")
+        self.player.load(events, duration, cur["title"], fit=not take)
+        self.observer.source = "take" if take else "library"
 
     def _play_queue(self, works: list[dict], shuffle: bool = False) -> None:
         if not works:
@@ -224,7 +228,7 @@ class Pianod:
             return {"ok": False, "error": f"{cmd}: {type(e).__name__}: {e}"}
         if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
                        "net", "wifi_scan", "wifi_log", "pianists", "pianist_works", "collection",
-                       "favourites", "shelves"):
+                       "favourites", "shelves", "observe"):
             self._push()
         return {"ok": True, **(reply or {})}
 
@@ -353,7 +357,11 @@ class Pianod:
                     self._require_library_mode(live_ok=True)
                     if self.player.playing:
                         raise ValueError(f"the piano is playing {self.player.title!r}")
+                if not dry:
+                    self.observer.source = "live"
                 return self.live.add(req.get("source"), req["events"], dry=dry)
+            if cmd == "observe":
+                return {"observe": self.observer.status()}
             if cmd == "live_cancel":
                 return self.live.cancel(req.get("source"))
 
@@ -390,6 +398,7 @@ class Pianod:
                     self.live.cancel()
                     self.looper.clear()
                     self.mode = mode
+                    self.observer.source = "loop" if mode == "performance" else "library"
                 return {}
 
             if cmd in ("perf_record", "perf_close_loop", "perf_take", "perf_play",
@@ -439,7 +448,11 @@ class Pianod:
 
     def _run_calibration(self):
         c = self.calib
-        c.run()
+        self.observer.enabled = False                 # it measures the same things itself
+        try:
+            c.run()
+        finally:
+            self.observer.enabled = True
         self.out.panic()
         c.rig.close()
         with self.lock:
@@ -450,7 +463,7 @@ class Pianod:
                     c.phase, c.message = "failed", f"couldn't save: {e}"
                 else:
                     self.cal = calibration.load(f"{DATA}/calibration.json")
-                    self.player.cal = self.looper.cal = self.live.cal = self.cal
+                    self.player.cal = self.looper.cal = self.live.cal = self.observer.cal = self.cal
             LOG.info("calibration %s %s", c.phase, c.message)
             for line in self.calib_summary:
                 LOG.info("calibration: %s", line)
@@ -503,6 +516,8 @@ class Pianod:
             if calib is not None and not calib.finished:
                 calib.rig.feed(kind, a, b)           # raw: the calibration wants the echoes
                 continue
+            if kind == "on":
+                self.observer.echo(a, b)
             if kind in ("on", "off") and self.gate.is_echo(kind, a):
                 continue
             self.last_input = time.monotonic()
@@ -561,6 +576,7 @@ class Pianod:
         last_push = time.monotonic()
         while True:
             self.looper.poll()
+            self.observer.poll()
             time.sleep(POLL)
             t = time.monotonic()
             self._flush_keys(t)

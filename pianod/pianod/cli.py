@@ -14,6 +14,7 @@
   piano panic                   silence, now
   piano calibrate [MINUTES]     measure every key (up to an hour), optionally starting later
   piano calibrate cancel
+  piano observed [DAYS]         what playing has shown about the calibration (default 7 days)
 """
 
 from __future__ import annotations
@@ -78,6 +79,11 @@ def show(st: dict) -> None:
 def main(argv=None) -> int:
     a = list(sys.argv[1:] if argv is None else argv)
     cmd = a.pop(0) if a else "status"
+    if cmd == "observed":
+        from . import daemon, observe
+        for line in observe.summary(observe.read(daemon.DATA, int(a[0]) if a else 7)):
+            print(line)
+        return 0
     if cmd == "play" and a:
         if a[0] == "all":
             req = {"cmd": "play", "all": True}

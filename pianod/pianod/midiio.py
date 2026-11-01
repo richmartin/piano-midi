@@ -21,6 +21,8 @@ class MidiOut:
         self.lock = threading.Lock()
         self.active: set[int] = set()      # notes currently on
         self.dirty = False                 # anything sent since the last panic (a pedal may be down)
+        self.sustain = False               # as last sent
+        self.observer = None               # observe.Observer: every note-on, against its echo
 
     @property
     def connected(self) -> bool:
@@ -38,17 +40,23 @@ class MidiOut:
 
     def note_on(self, note: int, velocity: int) -> None:
         import mido
+        if self.observer is not None and self.port is not None:
+            self.observer.sent(note, velocity, self.sustain, len(self.active))
         self.active.add(note)
         self.dirty = True
         self._send(mido.Message("note_on", note=note, velocity=max(0, min(127, velocity))))
 
     def note_off(self, note: int) -> None:
         import mido
+        if self.observer is not None and note in self.active:
+            self.observer.released(note)
         self.active.discard(note)
         self._send(mido.Message("note_off", note=note, velocity=0))
 
     def cc(self, control: int, value: int) -> None:
         import mido
+        if control == 64:
+            self.sustain = value >= 64
         self.dirty = True
         self._send(mido.Message("control_change", control=control, value=max(0, min(127, value))))
 

@@ -272,6 +272,23 @@ badge, B cancels) so it can run with nobody home. Up to an hour; it's meant to b
 - pianod syncs from `http://piano.fam-mart.in` (live 2026-10-29: 600 of 609 files kept their ids,
   matched by content; 9 new).
 
+## Every playback observed (observe.py, 2026-11-01)
+
+The key sensors echo every note the solenoids play, so ordinary playback is calibration data:
+for each note-on sent, how long until the sensors saw it strike, how hard they say it landed, or
+that it never sounded, with the pedal, how many notes were already sounding, how long it was
+held if released before it struck, and what the calibration predicted. One JSON row per note in
+`/var/lib/piano/observe/<day>.jsonl`, kept 60 days. `piano observed [DAYS]` summarises it: misses
+and strike error by velocity, under the pedal, in chords, and the keys furthest from their
+calibration.
+
+Recording only; nothing feeds back. A full calibration stays the anchor (loudness needs the mic
+and isolated notes, and the model only observes what it chooses to play, so music shows a key
+getting worse far more readily than better). Paused during a calibration; a run of 20 notes with
+no echo means nobody is listening (wagon off, MIDI not lit), and recording waits for an echo.
+Once there is a week or two of it: how much does timing drift, over a piece and over days, and is
+it worth slow, bounded updates toward what the music shows?
+
 ## Saxy's Band on the piano (live.py, 2026-10-30)
 
 Saxy (saxy2.fam-mart.in, the jazz sax course) can play its Band's pianist on this piano, with
