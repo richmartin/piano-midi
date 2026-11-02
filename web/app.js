@@ -96,6 +96,7 @@ function onState(st) {
   setStatus("connected");
   renderPlayer();
   markPlaying();
+  chat.mark();
   if (first) {
     loadFavourites();
     if (location.hash.replace(/^#\/?/, "") === "") home();       // the collections come from the piano
@@ -446,6 +447,93 @@ function toast(text, bad = false) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
 }
+
+// --- the companion: ask the piano what to play (pianod asks Zeus; nothing AI in the browser) ---
+const chat = (() => {
+  const KEY = "piano.companion";
+  const panel = $("#chat"), log = $("#chat-log"), form = $("#chat-form"), input = $("#chat-in");
+  const STARTERS = ["I don't know what to listen to next.", "Play something dark and broody.",
+                    "What's the fastest, highest-energy piece in the library?", "Do I have any pieces composed after 1950?"];
+  let messages = [], busy = false, ready = null;
+  try { messages = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch { messages = []; }
+  const save = () => { try { sessionStorage.setItem(KEY, JSON.stringify(messages.slice(-30))); } catch {} };
+
+  function pick(w, list) {
+    const lw = lib.works.get(w.id);
+    const title = (lw ? lw.title : w.title) + (w.movement ? ` · ${w.movement}` : "");
+    const who = lw ? (lw.composer.short || lw.composer.name) : w.composer;
+    const sub = [who, lw && lw.pianist ? `played by ${lw.pianist.name}` : null, w.duration ? mmss(w.duration) : null].filter(Boolean).join(" · ");
+    return `<button class="pick" data-id="${esc(w.id)}" title="Play it">
+      <span class="go">${icon.play}</span><span><span class="t">${esc(title)}</span><br><span class="c">${esc(sub)}</span></span>
+      <span class="y">${list && w.year ? w.year : ""}</span></button>`;
+  }
+
+  function render() {
+    if (!messages.length) {
+      log.innerHTML = `<div class="chat-hello">${ready === false
+        ? "The companion isn't set up yet: pianod needs its token for Zeus, the house's AI service."
+        : "Tell me a mood, a composer, a question — or that you <em>don't know what you want</em>. I know every piece in the library, your favourites, and what you've played lately."}</div>
+        ${ready === false ? "" : `<div class="starters">${STARTERS.map(t => `<button>${esc(t)}</button>`).join("")}</div>`}`;
+      log.querySelectorAll(".starters button").forEach(b => (b.onclick = () => send(b.textContent)));
+    } else {
+      log.innerHTML = messages.map(m => {
+        if (m.role === "user") return `<div class="msg user">${esc(m.text)}</div>`;
+        const ws = m.works || [];
+        const list = m.action === "list";
+        return `<div class="msg bot${m.err ? " err" : ""}"><div class="said">${esc(m.text)}</div>
+          ${ws.length ? `<div class="picks">${ws.map(w => pick(w, list)).join("")}</div>` : ""}</div>`;
+      }).join("") + (busy ? `<div class="thinking"><i></i><i></i><i></i></div>` : "");
+    }
+    log.querySelectorAll(".pick").forEach(b => (b.onclick = () => play({ ids: [b.dataset.id] })));
+    mark();
+    log.scrollTop = log.scrollHeight;
+    $(".chat-send").disabled = busy || ready === false;
+  }
+
+  function mark() {
+    const id = piano.state && piano.state.id;
+    log.querySelectorAll(".pick").forEach(b => b.classList.toggle("playing", b.dataset.id === id));
+  }
+
+  async function send(text) {
+    text = (text || "").trim();
+    if (!text || busy) return;
+    messages.push({ role: "user", text });
+    busy = true; save(); render();
+    let r = null;
+    try {
+      const res = await fetch("api/companion", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: messages.slice(-12).map(m => ({ role: m.role, text: m.text, ids: (m.works || []).map(w => w.id) })) }) });
+      r = await res.json();
+    } catch { r = { ok: false, error: "The piano isn't answering." }; }
+    busy = false;
+    if (r.ok) {
+      messages.push({ role: "assistant", text: r.reply, works: r.works || [], action: r.action });
+      if (r.action === "play") toast("Playing on the piano");
+    } else {
+      messages.push({ role: "assistant", err: true, text: `Sorry — ${(r.error || "something went wrong").replace(/^the companion is unavailable: /, "")}.` });
+    }
+    save(); render();
+  }
+
+  function open(on) {
+    panel.hidden = !on;
+    document.body.classList.toggle("chatting", on);
+    $("#ask").setAttribute("aria-expanded", String(on));
+    if (on) {
+      if (ready === null) api("companion", { probe: 1 }).then(r => { ready = r ? r.ready : null; render(); });
+      render();
+      setTimeout(() => input.focus(), 50);
+    }
+  }
+
+  form.onsubmit = e => { e.preventDefault(); const t = input.value; input.value = ""; send(t); };
+  $("#ask").onclick = () => open(true);
+  $("#chat-close").onclick = () => open(false);
+  $("#chat-new").onclick = () => { messages = []; save(); render(); input.focus(); };
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !panel.hidden) open(false); });
+  return { mark };
+})();
 
 window.addEventListener("hashchange", route);
 loadLibrary().then(() => { route(); renderPlayer(); }).catch(() => {

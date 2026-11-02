@@ -23,7 +23,7 @@ import socket
 import threading
 import time
 
-from . import (calibrate, calibration, history, library, live, looper, midiio, network, observe, player,
+from . import (calibrate, calibration, companion, history, library, live, looper, midiio, network, observe, player,
                smf, store, web)
 
 LOG = logging.getLogger("pianod")
@@ -231,7 +231,7 @@ class Pianod:
             LOG.exception("%s crashed (%s)", cmd, _brief_req(req))
             return {"ok": False, "error": f"{cmd}: {type(e).__name__}: {e}"}
         if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
-                       "net", "wifi_scan", "wifi_log", "pianists", "pianist_works", "collection",
+                       "net", "wifi_scan", "wifi_log", "companion", "pianists", "pianist_works", "collection",
                        "favourites", "shelves", "observe", "history"):
             self._push()
         return {"ok": True, **(reply or {})}
@@ -248,6 +248,24 @@ class Pianod:
         LOG.info("%s: catching up with the library for %s", cmd, ", ".join(map(str, ids)))
         self.lib.sync(SERVER_URL, only=ids)
         return self._handle(cmd, req)
+
+    def _companion(self, req):
+        """A turn of conversation (slow: two calls to Zeus), outside the lock."""
+        if req.get("probe"):
+            return {"ready": companion.ready()}
+        if not companion.ready():
+            raise ValueError("the companion isn't set up (no ZEUS_URL/ZEUS_TOKEN)")
+        try:
+            r = companion.turn(self.lib, list(req.get("messages") or []), list(self.favourites),
+                               self.history.read(40), self.state())
+        except companion.CompanionError as e:
+            raise ValueError(f"the companion is unavailable: {e}") from e
+        if r["action"] == "play":
+            res = self.handle({"cmd": "play", "ids": [w["id"] for w in r["works"]]})
+            if not res.get("ok"):
+                r["action"] = "suggest"
+                r["error"] = res.get("error")
+        return r
 
     def _auto_sync(self):
         time.sleep(SYNC_FIRST)
@@ -457,6 +475,8 @@ class Pianod:
                 smf.save(path, self.looper.merged_events(), title)
                 return {"saved": os.path.basename(path)}
 
+        if cmd == "companion":
+            return self._companion(req)
         if cmd == "sync":
             # The downloads run outside the lock; the mirror swap inside library.sync is atomic
             # per file, and reads of self.lib go through self.lock only for the lists, which

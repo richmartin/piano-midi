@@ -25,6 +25,11 @@ Environment=PIANO_ECHO_MS=250
 Environment=PIANO_SYSLOG=192.168.0.51:1514
 # Quiet hours: Saxy's Band (POST /api/events) takes dry runs only (live.py).
 Environment=PIANO_CURFEW=22:00-07:00
+# The companion (companion.py) asks Zeus, the fleet's AI gateway, never a model directly. Its
+# token is machine-local and never in this repo: ZEUS_TOKEN=... in /var/lib/piano/zeus.env
+# (root, 0600), matched by piano:<token> in Zeus's ZEUS_TOKENS. Without it the companion says so.
+Environment=ZEUS_URL=http://192.168.0.51:8390
+EnvironmentFile=-/var/lib/piano/zeus.env
 
 [Install]
 WantedBy=multi-user.target

@@ -32,7 +32,7 @@ LOG = logging.getLogger("pianod")
 PORT = int(os.environ.get("PIANO_HTTP", "8080"))
 WEB_ROOT = os.environ.get("PIANO_WEB", "")
 COMMANDS = {"status", "play", "toggle", "pause", "resume", "stop", "next", "prev", "seek", "volume",
-            "panic", "fav", "favourites", "queue", "shelves", "collection", "sync", "history"}
+            "panic", "fav", "favourites", "queue", "shelves", "collection", "sync", "history", "companion"}
 # POST paths that aren't a command's own name
 ROUTES = {"events": "live", "events/cancel": "live_cancel"}
 CORS_ORIGINS = set(filter(None, os.environ.get(

@@ -322,3 +322,25 @@ bass and drums from the tablet, and trade fours with a saxophone. The tablet sen
   N minutes → panic, grace, plug off). Power metering is the "piano is actually on" signal.
 - If someone is playing the keys (MIDI IN outside Performance mode), don't start remote playback
   and don't power off — `Pianod.last_input` already tracks this.
+
+
+## The companion (companion.py, 2026-11-02)
+
+"Ask the piano" in the web player: a conversation about what to play, which can see the library,
+the favourites and the play history, and can play what it suggests.
+
+- **All AI goes through Zeus** (the fleet's gateway, `POST $ZEUS_URL/ai/v1/chat`, a bearer token
+  per app; Zeus picks the model). No model key anywhere near the Pi; the token is in
+  `/var/lib/piano/zeus.env`, never in the browser or this repo.
+- **Zeus's chat has no tool use**, so a turn is two calls with the searching in code between:
+  the conversation becomes a search (composers, era, key, dates, length, an energy and a darkness
+  to aim for, an order); pianod runs it over the catalogue and each work's measurements; the
+  model then chooses from at most 12 (30 for a list) and answers `{reply, action, ids, years}`.
+  Ids it wasn't shown are dropped, so it can't invent a work. "play" plays through pianod.
+- **The measurements** (features.py) are made by the librarian into library.json: notes per
+  minute, median velocity, register, pedal, chord density, a Krumhansl-Schmuckler key. "Dark" is
+  minor, low and slow; "energy" is mostly notes per minute.
+- **History** (history.py): each listen, how far it got and whether it finished, in
+  `DATA/history.jsonl`, from the daemon's state once a second.
+- The browser keeps the conversation (sessionStorage) and sends the last turns each time;
+  pianod holds nothing between turns.
