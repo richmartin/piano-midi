@@ -167,8 +167,9 @@ class Library:
         return [w for w in self._works.values() if not os.path.exists(self.path(w))]
 
     # --- sync ---------------------------------------------------------------------------
-    def sync(self, base_url: str, fetch=_default_fetch) -> dict:
-        """Refresh the mirror from the server. Returns {"works": n, "fetched": n}.
+    def sync(self, base_url: str, fetch=_default_fetch, only=None) -> dict:
+        """Refresh the mirror from the server. Returns {"works": n, "fetched": n, "changed": bool}.
+        `only`: fetch just these works' files (one asked for now); the rest can wait.
 
         The new library.json only replaces the old one after it parses and its shape checks out,
         and each file lands atomically, so a failed sync never breaks what was there.
@@ -183,17 +184,26 @@ class Library:
             for w in c["works"]:
                 if not (w.get("id") and w.get("title") and w.get("url")):
                     raise ValueError(f"malformed work entry: {str(w)[:80]}")
-        store.write_bytes(os.path.join(self.root, "library.json"), raw)
-        self.load()
+        path = os.path.join(self.root, "library.json")
+        try:
+            with open(path, "rb") as f:
+                changed = f.read() != raw
+        except OSError:
+            changed = True
+        if changed:                       # (an hourly look at an unchanged library writes nothing)
+            store.write_bytes(path, raw)
+            self.load()
         fetched = 0
         for w in self.missing():
+            if only is not None and w["id"] not in only:
+                continue
             url = base_url.rstrip("/") + w["url"]
             try:
                 store.write_bytes(self.path(w), fetch(url))
                 fetched += 1
             except (OSError, ValueError) as e:
                 LOG.warning("sync: %s: %s", url, e)
-        return {"works": len(self._works), "fetched": fetched}
+        return {"works": len(self._works), "fetched": fetched, "changed": changed}
 
     # --- recordings ----------------------------------------------------------------------
     def recording_path(self, title: str) -> str:

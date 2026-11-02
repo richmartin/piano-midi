@@ -79,6 +79,7 @@ MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
 ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
 POLL = 0.005                  # looper tick
 MIC_CHECK_EVERY = 30.0        # seconds between looks for a working mic
+SYNC_FIRST, SYNC_EVERY = 120.0, 3600.0    # looks for a republished library, when idle
 PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
 KEYS_EVERY = 0.05             # the panel's live keys: at most twenty batches a second
 MODES = ("library", "performance")
@@ -216,7 +217,7 @@ class Pianod:
             LOG.warning("panel: %s", str(req.get("text", ""))[:2000])
             return {"ok": True}
         try:
-            reply = self._handle(cmd, req)
+            reply = self._handle_fresh(cmd, req)
         except (ValueError, OSError, looper.LooperError) as e:
             LOG.warning("%s failed: %s (%s)", cmd, e, _brief_req(req))
             return {"ok": False, "error": str(e)}
@@ -231,6 +232,35 @@ class Pianod:
                        "favourites", "shelves", "observe"):
             self._push()
         return {"ok": True, **(reply or {})}
+
+    def _handle_fresh(self, cmd, req):
+        """_handle, but a work this mirror hasn't heard of yet is fetched first: the web player
+        is served by the librarian, so it shows a republished library before the hourly sync."""
+        try:
+            return self._handle(cmd, req)
+        except ValueError as e:
+            if not str(e).startswith("no such work") or cmd not in ("play", "fav"):
+                raise
+        ids = set(req.get("ids") or [req.get("id")])
+        LOG.info("%s: catching up with the library for %s", cmd, ", ".join(map(str, ids)))
+        self.lib.sync(SERVER_URL, only=ids)
+        return self._handle(cmd, req)
+
+    def _auto_sync(self):
+        time.sleep(SYNC_FIRST)
+        while True:
+            with self.lock:
+                busy = self.player.playing or self.live.status() or self._calibrating()
+            if not busy:
+                try:
+                    r = self.lib.sync(SERVER_URL)
+                    if r["changed"] or r["fetched"]:
+                        LOG.info("library sync: %(works)d works, %(fetched)d fetched", r)
+                        self.lib.measure()
+                        self._push()
+                except (OSError, ValueError) as e:
+                    LOG.warning("library sync: %s", e)
+            time.sleep(SYNC_EVERY)
 
     def _calibrating(self) -> bool:
         return self.calib is not None and not self.calib.finished
@@ -569,6 +599,7 @@ class Pianod:
         threading.Thread(target=self._midi_in_loop, daemon=True, name="midi-in").start()
         threading.Thread(target=self._watch_mic, daemon=True, name="mic-check").start()
         threading.Thread(target=self.lib.measure, daemon=True, name="durations").start()
+        threading.Thread(target=self._auto_sync, daemon=True, name="library-sync").start()
         web.serve(self, DATA)
         notify("READY=1")
         LOG.info("pianod up: %d works, MIDI out %s", len(self.lib.all_works()),

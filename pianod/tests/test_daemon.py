@@ -1,6 +1,7 @@
 """The daemon's command handling, with a captured MIDI out and a tiny real library on disk."""
 
 import json
+import os
 import time
 
 import pytest
@@ -275,3 +276,26 @@ def test_every_list_the_panel_asks_for_as_it_asks(d):
         assert fetch("collection", "works", collection=c["slug"])
     fetch("favourites", "works")
     fetch("recordings", "works")
+
+
+def test_a_work_republished_since_the_last_sync_is_fetched_when_asked_for(d, monkeypatch):
+    # The web player is served by the librarian: it can offer a work this mirror hasn't got.
+    newer = {"composers": [{"name": "Gershwin, George", "slug": "gershwin", "works": [
+        {"id": "file-id-000811", "title": "Rhapsody in Blue", "url": "/midi-files/file-id-000811.mid"}]}]}
+    piece = os.path.join(daemon.DATA, "rhapsody.mid")
+    tiny_piece(piece, 64)
+    fetched = []
+
+    def fetch(url):
+        fetched.append(url)
+        if url.endswith("library.json"):
+            return json.dumps(newer).encode()
+        return open(piece, "rb").read()
+
+    real = d.lib.sync
+    monkeypatch.setattr(d.lib, "sync", lambda base, only=None: real(base, fetch=fetch, only=only))
+    ok(d, "play", ids=["file-id-000811"])
+    assert d.state()["title"] == "Rhapsody in Blue"
+    assert len(fetched) == 2
+    r = d.handle({"cmd": "play", "ids": ["file-id-999999"]})     # really not there: still an error
+    assert not r["ok"] and "no such work" in r["error"]

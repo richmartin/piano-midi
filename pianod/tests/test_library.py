@@ -80,10 +80,20 @@ def test_sync_fetches_whats_missing(root):
         return b"fake midi " + url.encode()
 
     result = lib.sync("https://server.example", fetch=fetch)
-    assert result == {"works": 3, "fetched": 2}
+    assert result == {"works": 3, "fetched": 2, "changed": False}     # the fixture has it already
     assert os.path.exists(os.path.join(root, "midi-files", "file-id-000030.mid"))
     # The file that was already there was not re-downloaded.
     assert not any(u.endswith("file-id-000009.mid") for u in fetched_urls)
+
+
+def test_sync_of_an_unchanged_library_writes_nothing_and_can_fetch_just_one(root):
+    lib = Library(root)
+    fetch = lambda url: json.dumps(LIB).encode() if url.endswith("library.json") else b"midi"  # noqa: E731
+    r = lib.sync("https://server.example", fetch=fetch, only={"file-id-000030"})
+    assert (r["fetched"], r["changed"]) == (1, False)
+    assert len(lib.missing()) == 1
+    r = lib.sync("https://server.example", fetch=fetch)
+    assert (r["fetched"], r["changed"]) == (1, False)
 
 
 def test_sync_rejects_a_malformed_library(root):
