@@ -73,9 +73,9 @@ REPLY_SCHEMA = {
                 "description": "work ids, only ones you were shown: the suggestion, what to play, "
                                "or the list in order"},
         "years": {"type": "array", "items": {"type": ["integer", "null"]},
-                  "description": "for a list: the year each work was composed, in the same order as ids, null if unsure"},
+                  "description": "the year each work in ids was composed, in the same order, null if unsure; [] if no ids"},
     },
-    "required": ["reply", "action", "ids"],
+    "required": ["reply", "action", "ids", "years"],     # every field we read (a model skips the rest)
 }
 
 PLAN_SYSTEM = """You turn a listener's request into a search of a player piano's MIDI library \
