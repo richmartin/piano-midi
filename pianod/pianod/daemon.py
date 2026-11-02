@@ -17,6 +17,7 @@ import glob
 import json
 import logging
 import os
+import queue
 import random
 import socket
 import threading
@@ -78,6 +79,7 @@ MIDI_OUT = os.environ.get("PIANO_MIDI_OUT", "")      # substring of the port nam
 MIDI_IN = os.environ.get("PIANO_MIDI_IN", "")
 ECHO_MS = float(os.environ.get("PIANO_ECHO_MS", "250"))             # 0 if the piano doesn't echo
 POLL = 0.005                  # looper tick
+OUTBOX = 200                  # messages queued for a client before it's deemed not reading
 MIC_CHECK_EVERY = 30.0        # seconds between looks for a working mic
 SYNC_FIRST, SYNC_EVERY = 120.0, 3600.0    # looks for a republished library, when idle
 PUSH_EVERY = 1.0              # unprompted state pushes (position moves, so push often)
@@ -619,11 +621,32 @@ class Pianod:
 
 def _serve_lines(d: Pianod, read_line, write_line, push: bool, name: str):
     """One client: read requests, write replies (and pushes, for the panel), until it goes away."""
-    send_lock = threading.Lock()
+    # Writes go through an outbox and a thread of their own: a client that stops reading (the
+    # badge wedged, 2026-11-02 09:18) used to block the write, and with it whichever thread was
+    # pushing -- the MIDI in, then the playback: Rhapsody in Blue stopped mid-bar.
+    outbox: queue.Queue = queue.Queue(maxsize=OUTBOX)
+    dropping = []
+
+    def writer():
+        while True:
+            s = outbox.get()
+            if s is None:
+                return
+            try:
+                write_line(s)
+            except Exception:           # gone; the reader will notice
+                return
+
+    threading.Thread(target=writer, daemon=True, name=f"{name}-out").start()
 
     def send(obj):
-        with send_lock:
-            write_line(json.dumps(obj, separators=(",", ":")) + "\n")
+        try:
+            outbox.put_nowait(json.dumps(obj, separators=(",", ":")) + "\n")
+            dropping.clear()
+        except queue.Full:
+            if not dropping:
+                LOG.warning("%s isn't reading; dropping what it's sent until it does", name)
+                dropping.append(1)
 
     if push:
         d.listeners.append(send)
@@ -650,6 +673,10 @@ def _serve_lines(d: Pianod, read_line, write_line, push: bool, name: str):
     finally:
         if push and send in d.listeners:
             d.listeners.remove(send)
+        try:
+            outbox.put_nowait(None)
+        except queue.Full:
+            pass
         (LOG.info if push else LOG.debug)("%s disconnected", name)
 
 

@@ -233,6 +233,7 @@ def test_keys_go_to_the_panel_in_batches_and_short_notes_still_flash(d):
 def test_the_panel_numbers_requests_with_rid_so_fav_keeps_its_work_id(d):
     sent, lines = [], [json.dumps({"cmd": "fav", "id": "file-id-000002", "rid": 7}), None]
     daemon._serve_lines(d, lambda: lines.pop(0), sent.append, False, "test")
+    wait_for(lambda: sent)
     reply = json.loads(sent[0])
     assert reply["ok"] and reply["fav"] is True and reply["rid"] == 7 and "id" not in reply
 
@@ -299,3 +300,33 @@ def test_a_work_republished_since_the_last_sync_is_fetched_when_asked_for(d, mon
     assert len(fetched) == 2
     r = d.handle({"cmd": "play", "ids": ["file-id-999999"]})     # really not there: still an error
     assert not r["ok"] and "no such work" in r["error"]
+
+
+def test_a_panel_that_stops_reading_cant_stop_the_music(d):
+    # 2026-11-02 09:18: the badge wedged, a write to it blocked, and playback stopped with it.
+    import threading
+    stuck = threading.Event()
+    lines = [json.dumps({"cmd": "status", "rid": 1})]
+    reader_done = threading.Event()
+
+    def read_line():
+        if lines:
+            return lines.pop(0)
+        reader_done.wait()
+        return None
+
+    def write_line(s):
+        stuck.wait()                                   # never returns until the test ends
+
+    t = threading.Thread(target=daemon._serve_lines, args=(d, read_line, write_line, True, "panel"),
+                         daemon=True)
+    t.start()
+    wait_for(lambda: d.listeners)
+    start = time.monotonic()
+    for _ in range(daemon.OUTBOX * 2):
+        d._push()
+    assert time.monotonic() - start < 2.0
+    reader_done.set()
+    stuck.set()
+    t.join(2)
+    assert not d.listeners
