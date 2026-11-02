@@ -23,7 +23,7 @@ import socket
 import threading
 import time
 
-from . import (calibrate, calibration, library, live, looper, midiio, network, observe, player,
+from . import (calibrate, calibration, history, library, live, looper, midiio, network, observe, player,
                smf, store, web)
 
 LOG = logging.getLogger("pianod")
@@ -123,6 +123,7 @@ class Pianod:
         self.index = -1
         self.listeners: list = []
         self.favourites: list[str] = store.read_json(f"{DATA}/favourites.json", [])
+        self.history = history.History(DATA)
         self.keys_pending: dict[int, bool] = {}   # the piano's keys, for the panel's strip
         self.keys_later: set[int] = set()
         self.keys_sent = 0.0
@@ -231,7 +232,7 @@ class Pianod:
             return {"ok": False, "error": f"{cmd}: {type(e).__name__}: {e}"}
         if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
                        "net", "wifi_scan", "wifi_log", "pianists", "pianist_works", "collection",
-                       "favourites", "shelves", "observe"):
+                       "favourites", "shelves", "observe", "history"):
             self._push()
         return {"ok": True, **(reply or {})}
 
@@ -310,6 +311,8 @@ class Pianod:
                 return {"fav": fav}
             if cmd == "queue":
                 return {"queue": [w["title"] for w in self.queue], "index": self.index}
+            if cmd == "history":
+                return {"history": self.history.read(int(req.get("limit") or 200))}
 
             if cmd == "play":
                 # One of: ids (a list), slug (a composer), all (everything); optional shuffle.
@@ -615,6 +618,7 @@ class Pianod:
             self._flush_keys(t)
             if t - last_push >= PUSH_EVERY:
                 self._push()
+                self.history.tick(self.state(), t)
                 notify("WATCHDOG=1")
                 last_push = t
 

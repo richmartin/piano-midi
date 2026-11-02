@@ -30,7 +30,7 @@ import requests
 import wikipedia
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "pianod"))
-from pianod import catalogue, smf  # noqa: E402
+from pianod import catalogue, features, smf  # noqa: E402
 from datetime import datetime
 
 # --- Configuration ---
@@ -866,15 +866,27 @@ class MidiLibraryGenerator:
         # The catalogue tidied (pianod/pianod/catalogue.py): canonical composers with dates and
         # eras, the pianists and roll systems in the roll titles, clean titles, lengths. It keeps
         # every v1 field, so older players still read it.
+        # Each file read once, for its length and for what it's like (features.py: tempo,
+        # register, key... for the companion).
+        stats = {}
+
         def duration(work_id):
             try:
                 events, _ = smf.load(str(self.midi_files_dir / f"{work_id}.mid"))
-                return round(events[-1].time, 1) if events else None
             except Exception as e:      # one damaged file is a missing length, not a failed build
                 logging.warning(f"No length for {work_id}: {e}")
                 return None
+            try:
+                stats[work_id] = features.measure(events)
+            except Exception as e:
+                logging.warning(f"No features for {work_id}: {e}")
+            return round(events[-1].time, 1) if events else None
 
         library_data = catalogue.tidy(library_data, duration=duration)
+        for c in library_data["composers"]:
+            for w in c["works"]:
+                if stats.get(w["id"]):
+                    w["stats"] = stats[w["id"]]
         with open(self.output_dir / "library.json", 'w', encoding='utf-8') as f:
             json.dump(library_data, f, ensure_ascii=False)
         with open(self.output_dir / "people.json", 'w', encoding='utf-8') as f:

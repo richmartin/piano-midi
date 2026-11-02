@@ -352,6 +352,8 @@ def tidy(lib: dict, duration=None) -> dict:
                 "original": original}
         if p["arranger"]:
             work["arranger"] = p["arranger"]
+        if w.get("stats"):                # features.py's measurements, from the librarian
+            work["stats"] = w["stats"]
         if p["unknown_pianist"] and not p["performer"]:
             work["performer"] = _slugify(p["unknown_pianist"])
             synth_p = {"name": p["unknown_pianist"], "short": p["unknown_pianist"],
