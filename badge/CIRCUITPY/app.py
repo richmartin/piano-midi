@@ -77,7 +77,9 @@ class Link:
         while LINK.in_waiting:
             if self.n == BUF_SIZE:   # a line longer than any pianod sends: garbage, start afresh
                 self.n = 0
-            got = LINK.readinto(mv[self.n:])
+            # only what's waiting: readinto waits to fill whatever it's given (timeout None), and
+            # a whole buffer's worth was 9 s of pushes, the panel frozen and "No contact"
+            got = LINK.readinto(mv[self.n:min(BUF_SIZE, self.n + LINK.in_waiting)])
             if not got:
                 return
             self.n += got
