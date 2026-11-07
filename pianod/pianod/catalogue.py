@@ -78,6 +78,32 @@ def find_composer(name: str) -> str | None:
     return _COMPOSER_INDEX.get(_key(name)) or _COMPOSER_INDEX.get(_key(re.sub(r"\(.*?\)", "", name)))
 
 
+def find_composer_by_initials(name: str) -> str | None:
+    """"F. F. Chopin", "J. S. Bach", "L. van Beethoven" (Mutopia's style): the composer whose family
+    name matches and whose first name starts with the first initial, if exactly one does: J. S. and
+    W. F. Bach stay apart, and anything that fits two composers matches neither."""
+    m = re.fullmatch(r"((?:[A-Z]\.\s*)+)((?:(?:van|von|de|del|di|du|le|la|da)\s+)*)(\S.*)", name.strip())
+    if not m:
+        return None
+    initials = re.findall(r"[A-Z]", m.group(1))
+    family = _key(m.group(3))
+    hits = []
+    for slug, info in _COMPOSERS.items():
+        fam = _family(info["name"], info.get("first", ""))
+        if _key(fam.split()[-1] if fam else "") != family:
+            continue
+        # the first initial decides (Chopin's catalogue first name is one word, Mutopia gives "F. F.")
+        if ascii_fold(info.get("first") or "x")[:1].upper() == initials[0]:
+            hits.append(slug)
+    return hits[0] if len(hits) == 1 else None
+
+
+def canonical_name(name: str) -> str:
+    """The catalogue's name for a composer however it's spelt, or the spelling as it is."""
+    slug = find_composer(name) or find_composer_by_initials(name)
+    return _COMPOSERS[slug]["name"] if slug and slug != UNKNOWN else name
+
+
 def _synth_composer(raw: str) -> dict:
     """A composer the data table doesn't know: make the best of the v1 spelling."""
     raw = re.sub(r"\s*\(.*?\)\s*", " ", raw).strip()

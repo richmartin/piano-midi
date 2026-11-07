@@ -364,3 +364,26 @@ body.chatting .ask-fab { opacity: 0; pointer-events: none; }
   .ask-fab { padding: 12px; } .ask-fab span { display: none; }
   .chat { width: 100vw; border-left: 0; }
 }
+
+/* --- scores ---------------------------------------------------------------------------------- */
+.scores { display: grid; gap: 18px; }
+.score-search { display: flex; gap: 10px; }
+.score-search input, .score-import input[type=text] {
+  flex: 1; min-width: 0; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line, #3a332c);
+  background: transparent; color: inherit; font: inherit; }
+.score-search input:focus, .score-import input:focus { outline: none; border-color: var(--brass); }
+.score-h { margin: 18px 0 0; }
+.works .score .num .n-text { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.works .score .dur .btn { padding: 6px 12px; font-size: 13px; }
+.works .score .badge { color: var(--brass-hi); }
+.works .score.state-failed .badge { color: #e0806a; }
+.works .score.state-converting .badge::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px;
+  border-radius: 50%; background: var(--brass); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .works .score.state-converting .badge::after { animation: none; } }
+.works .score .sub a { color: var(--brass); word-break: break-all; }
+.works .score .rm { font-size: 20px; line-height: 1; }
+.works .score:not(.state-ready) { cursor: default; }
+.score-import summary { cursor: pointer; color: var(--brass); font-weight: 600; }
+.score-import form { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.score-import .note, .scores .note { margin: 6px 0 0; opacity: .8; }

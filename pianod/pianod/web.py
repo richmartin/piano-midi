@@ -32,7 +32,10 @@ LOG = logging.getLogger("pianod")
 PORT = int(os.environ.get("PIANO_HTTP", "8080"))
 WEB_ROOT = os.environ.get("PIANO_WEB", "")
 COMMANDS = {"status", "play", "toggle", "pause", "resume", "stop", "next", "prev", "seek", "volume",
-            "panic", "fav", "favourites", "queue", "shelves", "collection", "sync", "history", "companion"}
+            "panic", "fav", "favourites", "queue", "shelves", "collection", "sync", "history", "companion",
+            "scores", "score_search", "score_import", "score_upload", "score_add", "score_retry",
+            "score_remove"}
+MAX_BODY = 60 * 1024 * 1024            # a 40 MB score, base64
 # POST paths that aren't a command's own name
 ROUTES = {"events": "live", "events/cancel": "live_cancel"}
 CORS_ORIGINS = set(filter(None, os.environ.get(
@@ -98,6 +101,8 @@ def make_handler(d, data_dir: str):
                 return self._json({"ok": False, "error": f"not here: {cmd!r}"}, 404)
             try:
                 n = int(self.headers.get("Content-Length") or 0)
+                if n > MAX_BODY:
+                    return self._json({"ok": False, "error": "that's too big"}, 413)
                 args = json.loads(self.rfile.read(n) or b"{}") if n else {}
                 if not isinstance(args, dict):
                     raise ValueError("arguments must be an object")

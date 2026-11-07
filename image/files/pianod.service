@@ -30,6 +30,10 @@ Environment=PIANO_CURFEW=22:00-07:00
 # (root, 0600), matched by piano:<token> in Zeus's ZEUS_TOKENS. Without it the companion says so.
 Environment=ZEUS_URL=http://192.168.0.51:8390
 EnvironmentFile=-/var/lib/piano/zeus.env
+# Scores (pipeline.py): sheet music goes to Saxy's pipeline, which reads and performs it. Its token is
+# Saxy's PIANO_SCORES_TOKEN, machine-local like Zeus's: SAXY_TOKEN=... in /var/lib/piano/saxy.env.
+Environment=SAXY_URL=http://192.168.0.51:8570
+EnvironmentFile=-/var/lib/piano/saxy.env
 
 [Install]
 WantedBy=multi-user.target

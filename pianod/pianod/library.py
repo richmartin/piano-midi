@@ -6,7 +6,8 @@ mirror from the server: library.json first, then any file the mirror is missing.
 immutable by id (file-id-000123.mid), so "missing" is the only check needed.
 
 Layout under root/:  library.json, midi-files/file-id-*.mid, recordings/*.mid (our own takes),
-durations.json (each work's length, measured once, in the background: on a Pi 4 the whole library
+scores/score-*.mid (sheet music turned into performances: scores.py, merged in under their
+composers like any work), durations.json (each work's length, measured once, in the background: on a Pi 4 the whole library
 takes minutes, longer than systemd waits for pianod to start).
 
 The catalogue is tidied (catalogue.tidy: canonical composers, eras, pianists, roll systems) when
@@ -55,8 +56,10 @@ COLLECTIONS = [
 
 
 class Library:
-    def __init__(self, root: str):
+    def __init__(self, root: str, scores=None):
+        """scores: () -> the ready scores (scores.Scores.ready), merged in at every load."""
         self.root = root
+        self.scores = scores
         self.composers: list[dict] = []
         self.pianists: list[dict] = []
         self._works: dict[str, dict] = {}       # id -> the work, with its composer's names
@@ -66,6 +69,13 @@ class Library:
 
     def load(self) -> None:
         data = store.read_json(os.path.join(self.root, "library.json"), {"composers": []})
+        extra = {}
+        for r in (self.scores() if self.scores else []):
+            extra[r["id"]] = {"score": True, "source": r.get("source"), "page": r.get("page"),
+                              "licence": r.get("licence"), "detail": r.get("detail")}
+            data.setdefault("composers", []).append({"name": r["composer"], "works": [{
+                "id": r["id"], "title": r["title"], "url": f"/scores/{r['id']}.mid",
+                "duration": r.get("duration")}]})
         try:
             from . import catalogue
             known = store.read_json(os.path.join(self.root, "durations.json"), {})
@@ -81,7 +91,8 @@ class Library:
         for c in self.composers:
             for w in c.get("works", []):
                 p = names.get(w.get("performer") or "")
-                self._works[w["id"]] = {**w, "composer": c["name"], "composer_short": c.get("short") or c["name"],
+                self._works[w["id"]] = {**w, **extra.get(w["id"], {}),
+                                        "composer": c["name"], "composer_short": c.get("short") or c["name"],
                                         "composer_slug": c.get("slug"),
                                         "performer_name": p["name"] if p else None,
                                         "performer_short": p.get("short") if p else None}
@@ -160,11 +171,13 @@ class Library:
         name = os.path.basename(urllib.parse.urlparse(work["url"]).path)
         if not re.fullmatch(r"[\w. -]+\.mid", name):
             raise ValueError(f"suspicious file name {name!r} in {work.get('id')}")
-        sub = "recordings" if work["url"].startswith("/recordings/") else "midi-files"
+        sub = ("recordings" if work["url"].startswith("/recordings/") else
+               "scores" if work["url"].startswith("/scores/") else "midi-files")
         return os.path.join(self.root, sub, name)
 
     def missing(self) -> list[dict]:
-        return [w for w in self._works.values() if not os.path.exists(self.path(w))]
+        """The server's works the mirror lacks (a score's file is ours, never the server's)."""
+        return [w for w in self._works.values() if not w.get("score") and not os.path.exists(self.path(w))]
 
     # --- sync ---------------------------------------------------------------------------
     def sync(self, base_url: str, fetch=_default_fetch, only=None) -> dict:

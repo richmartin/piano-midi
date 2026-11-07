@@ -330,3 +330,29 @@ def test_a_panel_that_stops_reading_cant_stop_the_music(d):
     stuck.set()
     t.join(2)
     assert not d.listeners
+
+
+def test_a_score_handed_over_by_saxy_plays_and_shows_under_its_composer(d, tmp_path):
+    import base64
+    import io
+
+    import mido
+    f = mido.MidiFile()
+    t = mido.MidiTrack()
+    f.tracks.append(t)
+    t.append(mido.Message("note_on", note=67, velocity=50, time=0))
+    t.append(mido.Message("note_off", note=67, velocity=0, time=480))
+    b = io.BytesIO()
+    f.save(file=b)
+    r = ok(d, "score_add", title="Ständchen", composer="F. Schubert",
+           source={"kind": "saxy", "ref": "saxy:42"}, midi_b64=base64.b64encode(b.getvalue()).decode())
+    sid = r["id"]
+    w = d.lib.work(sid)
+    assert w["composer"] == "Franz Schubert" and w["score"]
+    assert ok(d, "scores")["scores"][0]["state"] == "ready"
+    ok(d, "play", ids=[sid])
+    assert d.state()["id"] == sid
+    ok(d, "stop")
+    ok(d, "score_remove", id=sid)
+    with pytest.raises(ValueError):
+        d.lib.work(sid)

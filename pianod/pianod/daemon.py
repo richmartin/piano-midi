@@ -13,6 +13,7 @@ Same bones as hotpi's heatd, deliberately.
 
 from __future__ import annotations
 
+import base64
 import glob
 import json
 import logging
@@ -23,7 +24,7 @@ import socket
 import threading
 import time
 
-from . import (calibrate, calibration, companion, history, library, live, looper, midiio, network, observe, player,
+from . import (calibrate, calibration, companion, history, library, pipeline, scores, sources, live, looper, midiio, network, observe, player,
                smf, store, web)
 
 LOG = logging.getLogger("pianod")
@@ -105,7 +106,10 @@ class Pianod:
     def __init__(self, out=None, midi_in=None):
         self.lock = threading.RLock()
         os.makedirs(DATA, exist_ok=True)
-        self.lib = library.Library(DATA)
+        # sheet music turned into works (scores.py); ready ones join the library under their composer
+        self.scores = scores.Scores(DATA, pipeline.convert, on_ready=self._scores_changed,
+                                    accepts=pipeline.ACCEPTS)
+        self.lib = library.Library(DATA, scores=self.scores.ready)
         if out is None:
             out, midi_in = midiio.open_ports(MIDI_OUT, MIDI_IN)
         self.out = out
@@ -232,7 +236,7 @@ class Pianod:
             return {"ok": False, "error": f"{cmd}: {type(e).__name__}: {e}"}
         if cmd not in ("status", "composers", "works", "queue", "recordings", "calibrate_summary",
                        "net", "wifi_scan", "wifi_log", "companion", "pianists", "pianist_works", "collection",
-                       "favourites", "shelves", "observe", "history"):
+                       "favourites", "shelves", "observe", "history", "score_search", "scores"):
             self._push()
         return {"ok": True, **(reply or {})}
 
@@ -266,6 +270,37 @@ class Pianod:
                 r["action"] = "suggest"
                 r["error"] = res.get("error")
         return r
+
+    def _scores_changed(self):
+        with self.lock:
+            self.lib.load()
+        self._push()
+
+    def _score(self, cmd, req):
+        """The Scores browser: search the sources, import, and the list of what's been imported."""
+        if cmd == "score_search":
+            return {"results": sources.search(str(req.get("q") or ""))}
+        if cmd == "scores":
+            return {"scores": self.scores.list(), "pipeline": pipeline.ready()}
+        if cmd == "score_import":                   # a search result pianod can fetch itself
+            return {"score": self.scores.add_item(dict(req["item"]))}
+        if cmd == "score_upload":                   # a file Rich brought (an IMSLP PDF, say)
+            data = base64.b64decode(str(req["data_b64"]), validate=True)
+            return {"score": self.scores.add_upload(str(req["name"]), data, {
+                "title": req.get("title"), "composer": req.get("composer"), "page": req.get("page")})}
+        if cmd == "score_add":                      # a performance made elsewhere (Saxy's handoff)
+            midi = base64.b64decode(str(req["midi_b64"]), validate=True)
+            xml = base64.b64decode(str(req["musicxml_b64"]), validate=True) if req.get("musicxml_b64") else None
+            rec = self.scores.add_ready({k: req.get(k) for k in ("title", "composer", "detail", "source",
+                                                                  "performance")}, midi, xml)
+            return {"id": rec["id"], "score": rec}
+        if cmd == "score_retry":
+            return {"score": self.scores.retry(str(req["id"]))}
+        if cmd == "score_remove":
+            self.scores.remove(str(req["id"]))
+            self._scores_changed()
+            return {}
+        raise ValueError(f"unknown command {cmd!r}")
 
     def _auto_sync(self):
         time.sleep(SYNC_FIRST)
@@ -477,6 +512,8 @@ class Pianod:
 
         if cmd == "companion":
             return self._companion(req)
+        if cmd.startswith("score"):
+            return self._score(cmd, req)        # network and files: outside the lock
         if cmd == "sync":
             # The downloads run outside the lock; the mirror swap inside library.sync is atomic
             # per file, and reads of self.lib go through self.lock only for the lists, which
@@ -625,6 +662,7 @@ class Pianod:
         threading.Thread(target=self._watch_mic, daemon=True, name="mic-check").start()
         threading.Thread(target=self.lib.measure, daemon=True, name="durations").start()
         threading.Thread(target=self._auto_sync, daemon=True, name="library-sync").start()
+        threading.Thread(target=self.scores.run, daemon=True, name="scores").start()
         web.serve(self, DATA)
         notify("READY=1")
         LOG.info("pianod up: %d works, MIDI out %s", len(self.lib.all_works()),

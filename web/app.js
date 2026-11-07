@@ -408,6 +408,110 @@ function search(q) {
   bindWorks(ws);
 }
 
+// --- scores: sheet music the piano learns to play (pianod's scores.py, via Saxy's pipeline) ---
+const SCORE_STATE = { queued: "Waiting", converting: "Learning it…", ready: "Ready", failed: "Didn't work" };
+let scoresTimer;
+
+async function scores() {
+  clearTimeout(scoresTimer);
+  view.innerHTML = `<div class="hero"><div><p class="eyebrow">Sheet music</p><h1>Scores</h1>
+    <p class="lede">Find a public-domain score and the piano learns to play it: the notes are read from the
+    page and performed, not just played back.</p></div></div>
+    <section class="scores">
+      <form id="score-q" class="score-search" autocomplete="off">
+        <input type="search" name="q" placeholder="A composer or a piece: “Satie Gymnopédie”, “Chopin nocturne”" aria-label="Search for a score">
+        <button class="btn primary">Search</button>
+      </form>
+      <div id="score-results"></div>
+      <h2 class="score-h">Your scores</h2>
+      <div id="score-pipe"></div>
+      <ol id="score-list" class="works"></ol>
+      <details class="score-import"><summary>Import a score you already have</summary>
+        <p class="note">A PDF or MusicXML file, say one you downloaded from IMSLP. Public domain only, please.</p>
+        <form id="score-up" autocomplete="off">
+          <input type="file" name="file" accept=".pdf,.xml,.musicxml,.mxl" required>
+          <input type="text" name="title" placeholder="Title (optional)">
+          <input type="text" name="composer" placeholder="Composer (optional)">
+          <button class="btn">Import</button>
+        </form>
+      </details>
+    </section>`;
+  if (!piano.reachable) {
+    $("#score-list").outerHTML = `<p class="empty">Scores live on the piano, and it isn't connected just now.</p>`;
+    return;
+  }
+  $("#score-q").onsubmit = async e => {
+    e.preventDefault();
+    const q = e.target.q.value.trim();
+    if (!q) return;
+    $("#score-results").innerHTML = `<p class="empty">Looking…</p>`;
+    const r = await api("score_search", { q });
+    showResults(r ? r.results : []);
+  };
+  $("#score-up").onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target.file.files[0];
+    if (!f) return;
+    const data = await new Promise(res => { const rd = new FileReader(); rd.onload = () => res(rd.result.split(",")[1]); rd.readAsDataURL(f); });
+    const r = await api("score_upload", { name: f.name, data_b64: data, title: e.target.title.value.trim() || undefined,
+                                          composer: e.target.composer.value.trim() || undefined });
+    if (r) { toast(`“${r.score.title}” is in the queue`); e.target.reset(); refreshScores(); }
+  };
+  refreshScores();
+}
+
+function showResults(rs) {
+  const box = $("#score-results");
+  if (!box) return;
+  if (!rs.length) { box.innerHTML = `<p class="empty">Nothing found. Try a composer's surname, or fewer words.</p>`; return; }
+  box.innerHTML = `<ol class="works score-results">${rs.map((r, i) => `<li class="work score" data-i="${i}">
+    <span class="num"><span class="n-text">${r.source === "imslp" ? "IMSLP" : "Mutopia"}</span></span>
+    <div><div class="title">${esc(r.title)}</div>
+      <div class="sub">${esc(r.composer)}${r.composer_dates ? ` (${esc(r.composer_dates)})` : ""}${r.detail ? ` · ${esc(r.detail)}` : ""}</div></div>
+    <span class="dur">${r.auto ? `<button class="btn primary" data-add="${i}">Learn it</button>`
+      : `<a class="btn" href="${esc(r.page)}" target="_blank" rel="noopener">On IMSLP ↗</a>`}</span>
+  </li>`).join("")}</ol>
+  ${rs.some(r => !r.auto) ? `<p class="note">IMSLP doesn't let programs download its files: open the page, download a PDF
+  of a public-domain edition, and import it below.</p>` : ""}`;
+  box.querySelectorAll("[data-add]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const r = await api("score_import", { item: rs[+b.dataset.add] });
+    if (r) { toast(`“${r.score.title}” is in the queue`); refreshScores(); }
+    b.disabled = false;
+  });
+}
+
+async function refreshScores() {
+  clearTimeout(scoresTimer);
+  const list = $("#score-list");
+  if (!list) return;
+  const r = await api("scores");
+  if (!r || !$("#score-list")) return;
+  $("#score-pipe").innerHTML = r.pipeline ? "" :
+    `<p class="note">The piano can't reach the reading-and-performing service yet, so new scores wait in line.</p>`;
+  const ss = r.scores;
+  list.innerHTML = ss.length ? ss.map((s, i) => `<li class="work score state-${s.state}" data-id="${esc(s.id)}">
+    <span class="num"><span class="n-text">${i + 1}</span><span class="eq"><i></i><i></i><i></i></span></span>
+    <div><div class="title">${esc(s.title)}</div>
+      <div class="sub">${esc(s.composer)} · <span class="badge">${SCORE_STATE[s.state] || esc(s.state)}</span>
+      ${s.warning ? ` · ${esc(s.warning)}` : ""}${s.state === "failed" && s.error ? `<br>${linkify(s.error)}` : ""}</div></div>
+    <span class="dur">${s.state === "ready" ? mmss(s.duration) : s.state === "failed"
+      ? `<button class="btn" data-retry="${esc(s.id)}">Try again</button>` : ""}</span>
+    <button class="star rm" data-rm="${esc(s.id)}" aria-label="Remove">×</button>
+  </li>`).join("") : `<p class="empty">None yet. Search above, or import a file.</p>`;
+  list.querySelectorAll(".work.state-ready").forEach(li => li.onclick = e => {
+    if (!e.target.closest("button")) play({ ids: [li.dataset.id] });
+  });
+  list.querySelectorAll("[data-retry]").forEach(b => b.onclick = async () => { await api("score_retry", { id: b.dataset.retry }); refreshScores(); });
+  list.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => {
+    if (confirm("Remove this score from the piano?")) { await api("score_remove", { id: b.dataset.rm }); refreshScores(); }
+  });
+  markPlaying();
+  if (ss.some(s => s.state === "queued" || s.state === "converting")) scoresTimer = setTimeout(refreshScores, 5000);
+}
+
+const linkify = t => esc(t).replace(/https:\/\/[^\s<]+/g, u => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+
 function notFound() {
   view.innerHTML = `<div class="hero"><div><h1>Not here</h1><p class="lede">That page isn't in the library. <a href="#/" style="color:var(--brass)">Back to the start</a>.</p></div></div>`;
 }
@@ -418,7 +522,7 @@ function route() {
   const [page, arg] = path.split("/").map(decodeURIComponent);
   document.querySelectorAll(".nav a").forEach(a => a.toggleAttribute("aria-current", a.getAttribute("href") === `#/${page}`));
   if (page !== "search") $("#q").value = "";
-  const pages = { "": home, composers, composer, pianists, pianist, collection, favourites,
+  const pages = { "": home, composers, composer, pianists, pianist, collection, favourites, scores,
                   search: () => search(new URLSearchParams(query).get("q") || "") };
   (pages[page] || notFound)(arg);
   if (page !== "search") window.scrollTo(0, 0);
