@@ -261,12 +261,12 @@ class Scores:
                 update = {"state": "failed", "error": str(e)[:300], "done": time.time()}
         # what the pipeline noted on the record (its own id for the score, so a retry after Rich
         # chose the part in Saxy continues that score; a doubtful-reading warning)
-        update.update({k: rec[k] for k in ("pipeline_id", "warning", "warnings") if k in rec})
+        update = {**{k: rec[k] for k in ("pipeline_id", "warning", "warnings") if k in rec}, **update}
         with self.lock:
             if sid in self.items:                # (removed while it converted: forget it)
                 self.items[sid].update(update)
                 self._save()
-        if update["state"] == "ready" and self.on_ready:
+        if update.get("state") == "ready" and self.on_ready:
             self.on_ready()
         return True
 
