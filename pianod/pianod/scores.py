@@ -196,6 +196,20 @@ class Scores:
         self.wake.set()
         return dict(r)
 
+    def refresh(self, sid: str) -> dict:
+        """Fetch the pipeline's current performance again (Saxy re-performed it: a fixed reading, a
+        new style). The score stays playable as it was until the new MIDI is in."""
+        with self.lock:
+            r = self.items.get(sid) or {}
+            if r.get("state") not in ("ready", "failed") or not r.get("pipeline_id"):
+                raise ValueError("only a score the pipeline has finished can be fetched again")
+            r.update(refresh=True, error=None)
+            if r["state"] == "failed":
+                r["state"] = "queued"
+            self._save()
+        self.wake.set()
+        return dict(r)
+
     def remove(self, sid: str) -> None:
         with self.lock:
             r = self.items.pop(sid, None)
@@ -211,11 +225,14 @@ class Scores:
     # --- converting ---------------------------------------------------------------------
     def _next(self):
         with self.lock:
-            q = [r for r in self.items.values() if r["state"] == "queued"]
+            q = [r for r in self.items.values() if r["state"] == "queued" or r.get("refresh")]
             if not q:
                 return None
             r = min(q, key=lambda r: r["added"])
-            r["state"] = "converting"
+            if r.get("refresh") and r["state"] == "ready":
+                r["refresh"] = False              # stays "ready" (and playable) meanwhile
+            else:
+                r["state"], r["refresh"] = "converting", False
             self._save()
             return dict(r)
 

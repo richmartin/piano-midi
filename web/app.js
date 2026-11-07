@@ -498,10 +498,14 @@ async function refreshScores() {
       ${s.warning ? ` · ${esc(s.warning)}` : ""}${s.state === "failed" && s.error ? `<br>${linkify(s.error)}` : ""}</div></div>
     <span class="dur">${s.state === "ready" ? mmss(s.duration) : s.state === "failed"
       ? `<button class="btn" data-retry="${esc(s.id)}">Try again</button>` : ""}</span>
+    ${s.state === "ready" && s.pipeline_id ? `<button class="star rm" data-refresh="${esc(s.id)}" aria-label="Fetch the latest performance" title="Fetch Saxy's latest performance">↻</button>` : ""}
     <button class="star rm" data-rm="${esc(s.id)}" aria-label="Remove">×</button>
   </li>`).join("") : `<p class="empty">None yet. Search above, or import a file.</p>`;
   list.querySelectorAll(".work.state-ready").forEach(li => li.onclick = e => {
     if (!e.target.closest("button")) play({ ids: [li.dataset.id] });
+  });
+  list.querySelectorAll("[data-refresh]").forEach(b => b.onclick = async () => {
+    if (await api("score_refresh", { id: b.dataset.refresh })) toast("Fetching the latest performance");
   });
   list.querySelectorAll("[data-retry]").forEach(b => b.onclick = async () => { await api("score_retry", { id: b.dataset.retry }); refreshScores(); });
   list.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => {

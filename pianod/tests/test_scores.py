@@ -177,3 +177,24 @@ def test_a_minute_of_silence_after_the_music_is_trimmed():
 
 def test_ids_fold_accents():
     assert scores._slug("Ständchen, D.889") == "standchen-d-889"
+
+
+def test_a_reperformed_score_is_fetched_again_and_stays_playable_meanwhile(root):
+    versions = [midi_bytes(), midi_bytes(((60, 2.0),))]
+
+    def convert(path, kind, rec):
+        rec["pipeline_id"] = "s1"
+        return versions.pop(0)
+
+    s = scores.Scores(root, convert)
+    sid = s.add_upload("a.pdf", b"%PDF", {})["id"]
+    s.step()
+    assert s.list()[0]["duration"] == 1.0
+    with pytest.raises(ValueError):
+        s.refresh("score-nothing")
+    assert s.refresh(sid)["state"] == "ready"
+    rec = s._next()
+    assert rec["id"] == sid and s.list()[0]["state"] == "ready"      # still playable while it fetches
+    s.items[sid]["refresh"] = True
+    s.step()
+    assert s.list()[0]["duration"] == 2.0 and not s.step()

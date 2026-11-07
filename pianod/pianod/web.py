@@ -33,7 +33,7 @@ PORT = int(os.environ.get("PIANO_HTTP", "8080"))
 WEB_ROOT = os.environ.get("PIANO_WEB", "")
 COMMANDS = {"status", "play", "toggle", "pause", "resume", "stop", "next", "prev", "seek", "volume",
             "panic", "fav", "favourites", "queue", "shelves", "collection", "sync", "history", "companion",
-            "scores", "score_search", "score_import", "score_upload", "score_add", "score_retry",
+            "scores", "score_search", "score_import", "score_upload", "score_add", "score_retry", "score_refresh",
             "score_remove"}
 MAX_BODY = 60 * 1024 * 1024            # a 40 MB score, base64
 # POST paths that aren't a command's own name
