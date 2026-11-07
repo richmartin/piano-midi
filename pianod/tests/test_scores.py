@@ -122,7 +122,8 @@ MUTOPIA_PAGE = """<table class="table-bordered result-table"> <tr><td>Nocturne</
 def test_mutopia_results_parse():
     [r] = sources.parse_mutopia(MUTOPIA_PAGE)
     assert r["composer"] == "F. F. Chopin" and r["composer_dates"] == "1810–1849"
-    assert r["detail"].startswith("Op. 9, No. 2") and r["auto"]
+    assert r["title"] == "Nocturne, Op. 9, No. 2" and r["auto"]
+    assert r["detail"] == "1833 · G. Schirmer, New York, 1881"
     assert set(r["formats"]) == {"ly", "mid", "pdf"} and r["formats"]["pdf"].endswith("-a4.pdf")
     assert r["page"].endswith("id=1590")
 

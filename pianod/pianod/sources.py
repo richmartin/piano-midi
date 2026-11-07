@@ -114,9 +114,11 @@ def parse_mutopia(page: str) -> list[dict]:
         dates = re.search(r"\(([^)]*)\)\s*$", composer)
         out.append({
             "source": "mutopia", "ref": info.group(1) if info else links.get("ly", ""),
-            "title": text[0], "composer": re.sub(r"\s*\([^)]*\)\s*$", "", composer).strip(),
+            # the opus is a column of its own: "Nocturne" alone is one of twenty
+            "title": f"{text[0]}, {text[2]}" if text[2] and text[2] != "\xa0" and text[2] not in text[0] else text[0],
+            "composer": re.sub(r"\s*\([^)]*\)\s*$", "", composer).strip(),
             "composer_dates": dates.group(1) if dates else None,
-            "detail": " · ".join(t for t in (text[2], text[5], text[8]) if t and t != "\xa0"),
+            "detail": " · ".join(t for t in (text[5], text[8]) if t and t != "\xa0"),
             "instrument": re.sub(r"^for\s+", "", text[4]),
             "licence": text[9] if len(text) > 9 else "",
             "formats": {k: v for k, v in links.items() if k in ("mid", "pdf", "ly")},
