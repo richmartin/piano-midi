@@ -12,8 +12,11 @@ Saxy's API (saxy2, 2026-11-07):
                                     + meta (JSON: title, composer, source)       -> 202 {id, state}
   GET  /api/scores/{id}             {state: reading|review|performing|ready|failed, error, parts[],
                                      pianoParts[], quality{measures, low, ...}, warnings[], ...}
-  POST /api/scores/{id}/parts       {pianoParts: [...]}                          -> 202 (performing)
-  GET  /api/scores/{id}/midi        the performance: one piano track, CC64/67, tempo; 409 until ready
+  POST /api/scores/{id}/parts       {melody: "", piano: [...]}                   -> 202 (performing)
+  GET  /api/scores/{id}/midi        the performance: one piano track, CC64/66/67, tempo; 409 until ready
+Saxy confirms one or two two-staff parts itself (solo piano, a song's accompaniment, four hands), so
+"review" only comes for odd part sets; pianod then chooses when it's still clear, else sends Rich to
+Saxy's review page.
 """
 
 from __future__ import annotations
@@ -126,7 +129,7 @@ def convert(path: str, kind: str, rec: dict, sleep=time.sleep, clock=time.monoto
             if parts is None:
                 raise PipelineError("choose the piano part on Saxy's page, then try again: "
                                     + REVIEW_PAGE.format(id=sid))
-            _json("POST", f"/api/scores/{sid}/parts", {"pianoParts": parts})
+            _json("POST", f"/api/scores/{sid}/parts", {"melody": "", "piano": parts})
             chose = True
         if clock() > end:
             raise PipelineError("Saxy took too long; try again later")

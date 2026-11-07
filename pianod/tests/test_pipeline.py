@@ -58,7 +58,7 @@ def test_one_two_staff_part_is_chosen_for_rich(monkeypatch, score):
     path, rec = score
     run(monkeypatch, fake, path, rec)
     [post] = [c for c in fake.calls if c[1].endswith("/parts")]
-    assert json.loads(post[2]) == {"pianoParts": ["P2"]}
+    assert json.loads(post[2]) == {"melody": "", "piano": ["P2"]}
 
 
 def test_an_unclear_choice_sends_rich_to_the_review_page(monkeypatch, score):

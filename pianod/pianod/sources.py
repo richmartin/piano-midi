@@ -1,5 +1,9 @@
 """Online sheet-music sources the Scores browser searches: public domain and open licences only.
 
+  openscore OpenScore Lieder: ~1,300 songs for voice and piano as MusicXML (.mxl), CC0, on GitHub.
+            MusicXML needs no reading from a page, and Saxy confirms the piano part itself (the
+            voice shows on Saxy's stand): the best source there is. Searched in a list of its files,
+            fetched from GitHub once a day.
   mutopia   The Mutopia Project: engraved public-domain and CC scores, each with its LilyPond source,
             a PDF and a plain (mechanical) MIDI, all downloadable directly. Fully automatic.
   imslp     IMSLP: most of the classical piano repertoire as PDF scans. Searched here, but its file
@@ -22,6 +26,8 @@ import html
 import json
 import logging
 import re
+import time
+import unicodedata
 import urllib.parse
 import urllib.request
 
@@ -38,6 +44,47 @@ def _get(url: str) -> bytes:
 
 def _text(fragment: str) -> str:
     return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+# --- OpenScore Lieder ----------------------------------------------------------------------
+OPENSCORE_TREE = "https://api.github.com/repos/OpenScore/Lieder/git/trees/main?recursive=1"
+OPENSCORE_RAW = "https://raw.githubusercontent.com/OpenScore/Lieder/main/"
+OPENSCORE_PAGE = "https://github.com/OpenScore/Lieder/tree/main/"
+TREE_TTL = 24 * 3600
+_tree = {"at": 0.0, "songs": []}
+
+
+def _fold(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s) if not unicodedata.combining(c)).lower()
+
+
+def openscore_songs(tree: dict) -> list[dict]:
+    """scores/<Family,_First>/<Set or _>/<Song>/lc123.mxl -> one song each."""
+    out = []
+    for t in tree.get("tree", []):
+        m = re.fullmatch(r"scores/([^/]+)/([^/]+)/([^/]+)/(lc\d+)\.mxl", t.get("path", ""))
+        if not m:
+            continue
+        comp, coll, song, lc = (urllib.parse.unquote(x).replace("_", " ").strip() for x in m.groups())
+        if "," in comp:
+            fam, first = (x.strip() for x in comp.split(",", 1))
+            comp = f"{first} {fam}"
+        out.append({"source": "openscore", "ref": lc, "title": song, "composer": comp,
+                    "composer_dates": None, "detail": "" if coll in ("", "_") else coll,
+                    "instrument": "Voice and piano", "licence": "CC0 (public domain)",
+                    "formats": {"mxl": OPENSCORE_RAW + t["path"]},
+                    "page": OPENSCORE_PAGE + t["path"].rsplit("/", 1)[0], "auto": True,
+                    "_text": _fold(f"{comp} {coll} {song}")})
+    return out
+
+
+def openscore(query: str, get=_get, now=time.time) -> list[dict]:
+    if not _tree["songs"] or now() - _tree["at"] > TREE_TTL:
+        _tree["songs"] = openscore_songs(json.loads(get(OPENSCORE_TREE)))
+        _tree["at"] = now()
+    words = _fold(query).split()
+    hits = [s for s in _tree["songs"] if all(w in s["_text"] for w in words)]
+    return [{k: v for k, v in s.items() if k != "_text"} for s in hits[:40]]
 
 
 # --- Mutopia ------------------------------------------------------------------------------
@@ -106,7 +153,7 @@ def imslp(query: str, get=_get) -> list[dict]:
     return parse_imslp(json.loads(get(url)))
 
 
-SOURCES = {"mutopia": mutopia, "imslp": imslp}
+SOURCES = {"openscore": openscore, "mutopia": mutopia, "imslp": imslp}
 
 
 def search(query: str, sources=None, get=_get) -> list[dict]:

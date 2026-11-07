@@ -138,3 +138,19 @@ def test_imslp_results_link_out_and_a_dead_source_doesnt_empty_the_list():
     [r] = sources.search("satie", get=get)
     assert r["source"] == "imslp" and r["composer"] == "Erik Satie" and not r["auto"]
     assert r["page"] == "https://imslp.org/wiki/Gymnop%C3%A9dies_%28Satie%2C_Erik%29"
+
+
+def test_openscore_songs_are_found_by_composer_or_title_without_accents():
+    tree = {"tree": [
+        {"path": "scores/Schubert,_Franz/Schwanengesang,_D.957/04_Ständchen/lc5148063.mxl"},
+        {"path": "scores/Schubert,_Franz/Schwanengesang,_D.957/04_Ständchen/lc5148063.mscx"},
+        {"path": "scores/Hensel,_Fanny/_/Schwanenlied/lc123.mxl"},
+        {"path": "README.md"}]}
+    sources._tree.update(at=0.0, songs=[])
+    get = lambda url: json.dumps(tree).encode()
+    [r] = sources.openscore("schubert standchen", get=get, now=lambda: 1e9)
+    assert r["composer"] == "Franz Schubert" and r["title"] == "04 Ständchen"
+    assert r["detail"] == "Schwanengesang, D.957" and r["auto"] and "_text" not in r
+    assert r["formats"]["mxl"].endswith("04_Ständchen/lc5148063.mxl")
+    [h] = sources.openscore("schwanenlied", get=lambda u: 1 / 0, now=lambda: 1e9 + 60)   # the list is kept
+    assert h["detail"] == "" and h["composer"] == "Fanny Hensel"
