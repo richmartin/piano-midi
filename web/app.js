@@ -100,6 +100,7 @@ function onState(st) {
   if (first) {
     loadFavourites();
     if (location.hash.replace(/^#\/?/, "") === "") home();       // the collections come from the piano
+    if (location.hash.startsWith("#/scores")) scores();          // so do the scores
   }
 }
 
