@@ -106,7 +106,8 @@ def test_dry_runs_are_counted_but_nothing_moves(lv):
 
 
 def test_quiet_hours_allow_only_dry_runs(lv):
-    lv.curfew = "00:00-23:59"
+    h = time.localtime().tm_hour                 # a window round now ("00:00-23:59" missed 23:59)
+    lv.curfew = f"{(h - 1) % 24:02d}:00-{(h + 2) % 24:02d}:00"
     with pytest.raises(ValueError, match="quiet hours"):
         lv.add("saxy", [{"t": wall(lv, 1.0), "note": 60, "vel": 60, "dur": 0.5}])
     assert lv.add("saxy", [], dry=True)["accepted"] == 0
