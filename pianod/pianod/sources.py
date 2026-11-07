@@ -36,8 +36,14 @@ UA = "pianod-score-browser/1 (a household piano; private use)"
 TIMEOUT = 20
 
 
+def safe_url(url: str) -> str:
+    """Percent-encode what isn't ASCII (OpenScore's paths have umlauts: "Ständchen"), leaving what's
+    already encoded alone."""
+    return urllib.parse.quote(url, safe=":/?&=%#,+;@!$'()*[]~")
+
+
 def _get(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(safe_url(url), headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return r.read()
 

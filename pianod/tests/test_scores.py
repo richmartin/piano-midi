@@ -154,3 +154,9 @@ def test_openscore_songs_are_found_by_composer_or_title_without_accents():
     assert r["formats"]["mxl"].endswith("04_Ständchen/lc5148063.mxl")
     [h] = sources.openscore("schwanenlied", get=lambda u: 1 / 0, now=lambda: 1e9 + 60)   # the list is kept
     assert h["detail"] == "" and h["composer"] == "Fanny Hensel"
+
+
+def test_urls_with_umlauts_are_encoded_once():
+    u = "https://raw.githubusercontent.com/OpenScore/Lieder/main/scores/Schubert,_Franz/_/Ständchen,_D.889/lc5133353.mxl"
+    assert sources.safe_url(u).endswith("/St%C3%A4ndchen,_D.889/lc5133353.mxl")
+    assert sources.safe_url(sources.safe_url(u)) == sources.safe_url(u)

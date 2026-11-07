@@ -24,7 +24,7 @@ import threading
 import time
 import urllib.request
 
-from . import catalogue, smf, store
+from . import catalogue, smf, sources, store
 
 LOG = logging.getLogger("pianod")
 MAX_INPUT = 40 * 1024 * 1024            # a 100-page scan; anything bigger isn't a piano piece
@@ -37,7 +37,7 @@ class PipelineError(Exception):
 
 
 def _download(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    req = urllib.request.Request(sources.safe_url(url), headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=60) as r:
         data = r.read(MAX_INPUT + 1)
     if len(data) > MAX_INPUT:
