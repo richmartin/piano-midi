@@ -46,7 +46,32 @@ def _download(url: str) -> bytes:
 
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40] or "score"
+    return re.sub(r"[^a-z0-9]+", "-", catalogue.ascii_fold(text).lower()).strip("-")[:40] or "score"
+
+
+TAIL_TICKS = 480                       # what's kept after the last note: a beat
+
+
+def trim_tail(midi: bytes) -> bytes:
+    """A score's MIDI with the silence after its last note cut to a beat. Saxy's first files closed
+    their track about a minute after the music (2026-11-07), and pianod plays a file to its end."""
+    import io
+
+    import mido
+    try:
+        f = mido.MidiFile(file=io.BytesIO(midi))
+    except Exception:
+        return midi
+    changed = False
+    for track in f.tracks:
+        if track and track[-1].type == "end_of_track" and track[-1].time > TAIL_TICKS:
+            track[-1].time = TAIL_TICKS
+            changed = True
+    if not changed:
+        return midi
+    out = io.BytesIO()
+    f.save(file=out)
+    return out.getvalue()
 
 
 class Scores:
@@ -145,7 +170,7 @@ class Scores:
             os.makedirs(os.path.join(self.dir, sid), exist_ok=True)
             if musicxml:
                 store.write_bytes(os.path.join(self.dir, sid, "score.musicxml"), musicxml)
-            store.write_bytes(self.midi_path(sid), midi)
+            store.write_bytes(self.midi_path(sid), trim_tail(midi))
             events, _ = smf.load(self.midi_path(sid))
             if not any(e.kind == "on" for e in events):
                 raise ValueError("that MIDI has no notes")
@@ -205,7 +230,7 @@ class Scores:
             midi = self.convert(src, rec["input"], rec)
             if not midi.startswith(b"MThd"):
                 raise PipelineError("the pipeline didn't return a MIDI file")
-            store.write_bytes(self.midi_path(sid), midi)
+            store.write_bytes(self.midi_path(sid), trim_tail(midi))
             events, _ = smf.load(self.midi_path(sid))
             if not any(e.kind == "on" for e in events):
                 raise PipelineError("the pipeline's MIDI has no notes")

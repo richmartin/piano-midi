@@ -160,3 +160,19 @@ def test_urls_with_umlauts_are_encoded_once():
     u = "https://raw.githubusercontent.com/OpenScore/Lieder/main/scores/Schubert,_Franz/_/Ständchen,_D.889/lc5133353.mxl"
     assert sources.safe_url(u).endswith("/St%C3%A4ndchen,_D.889/lc5133353.mxl")
     assert sources.safe_url(sources.safe_url(u)) == sources.safe_url(u)
+
+
+def test_a_minute_of_silence_after_the_music_is_trimmed():
+    import io
+    import mido
+    f = mido.MidiFile(file=io.BytesIO(midi_bytes()))
+    f.tracks[0].append(mido.MetaMessage("end_of_track", time=54000))
+    b = io.BytesIO()
+    f.save(file=b)
+    out = mido.MidiFile(file=io.BytesIO(scores.trim_tail(b.getvalue())))
+    assert out.tracks[0][-1].time == 480 and out.length < 2.0
+    assert scores.trim_tail(b"not midi") == b"not midi"
+
+
+def test_ids_fold_accents():
+    assert scores._slug("Ständchen, D.889") == "standchen-d-889"
