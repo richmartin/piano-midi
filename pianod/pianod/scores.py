@@ -255,7 +255,10 @@ class Scores:
                       "duration": round(events[-1].time, 1)}
         except Exception as e:                   # one bad score mustn't stop the queue
             LOG.warning("score %s failed: %s", sid, e)
-            update = {"state": "failed", "error": str(e)[:300], "done": time.time()}
+            if rec["state"] == "ready":          # fetching again: the performance it has stays
+                update = {"warning": f"couldn't fetch the latest performance: {str(e)[:200]}"}
+            else:
+                update = {"state": "failed", "error": str(e)[:300], "done": time.time()}
         # what the pipeline noted on the record (its own id for the score, so a retry after Rich
         # chose the part in Saxy continues that score; a doubtful-reading warning)
         update.update({k: rec[k] for k in ("pipeline_id", "warning", "warnings") if k in rec})

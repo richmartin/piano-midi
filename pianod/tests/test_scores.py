@@ -198,3 +198,23 @@ def test_a_reperformed_score_is_fetched_again_and_stays_playable_meanwhile(root)
     s.items[sid]["refresh"] = True
     s.step()
     assert s.list()[0]["duration"] == 2.0 and not s.step()
+
+
+def test_a_failed_fetch_again_keeps_the_performance_it_had(root):
+    calls = []
+
+    def convert(path, kind, rec):
+        rec["pipeline_id"] = "s1"
+        calls.append(1)
+        if len(calls) > 1:
+            raise scores.PipelineError("The piano's part could not be timed.")
+        return midi_bytes()
+
+    s = scores.Scores(root, convert)
+    sid = s.add_upload("a.pdf", b"%PDF", {})["id"]
+    s.step()
+    s.refresh(sid)
+    s.step()
+    [r] = s.list()
+    assert r["state"] == "ready" and "could not be timed" in r["warning"]
+    assert s.ready() and s.ready()[0]["id"] == sid
