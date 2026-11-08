@@ -129,8 +129,16 @@ def test_mode_switch_stops_playback(d):
     assert not d.player.playing
     assert d.mode == "performance"
     assert not d.handle({"cmd": "mode", "mode": "disco"})["ok"]
+    d.looper.layers.append(object())       # a take in the loop station: not thrown away by Play
+    d.looper.state = "stopped"
     r = d.handle({"cmd": "play", "slug": "bach-js"})
-    assert not r["ok"]                     # no library playback in performance mode
+    assert not r["ok"] and "take" in r["error"] and d.mode == "performance"
+
+
+def test_play_from_the_library_leaves_an_empty_performance_mode(d):
+    ok(d, "mode", mode="performance")
+    ok(d, "play", slug="bach-js")          # nothing recorded: nothing to lose, so it just plays
+    assert d.mode == "library" and d.player.playing
 
 
 def test_perf_commands_need_performance_mode(d):

@@ -579,7 +579,16 @@ class Pianod:
 
     def _require_library_mode(self, live_ok: bool = False):
         if self.mode != "library":
-            raise ValueError("in performance mode (switch back to the library first)")
+            # An empty loop station has nothing to lose: playing from the library just switches back
+            # (the web page has no mode switch, and "switch back first" left Rich stuck, 2026-11-08).
+            # With a take in it, refuse: switching clears the looper.
+            if self.looper.state != "empty" or self.looper.layers:
+                raise ValueError("Performance mode has a take in it: save or clear it on the panel first")
+            LOG.info("leaving an empty Performance mode to play from the library")
+            self.live.cancel()
+            self.looper.clear()
+            self.mode = "library"
+            self.observer.source = "library"
         if not live_ok and self.live.active():
             raise ValueError(f"the piano is playing {self.live.source}'s notes (stop first)")
 
