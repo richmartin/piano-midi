@@ -296,6 +296,8 @@ class Pianod:
             return {"id": rec["id"], "score": rec}
         if cmd == "score_retry":
             return {"score": self.scores.retry(str(req["id"]))}
+        if cmd == "score_reimport":                 # a fresh reading of the file it was made from
+            return {"score": self.scores.reimport(str(req["id"]))}
         if cmd == "score_refresh":                  # Saxy re-performed it: fetch the new MIDI
             return {"score": self.scores.refresh(str(req["id"]))}
         if cmd == "score_remove":

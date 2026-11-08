@@ -218,3 +218,22 @@ def test_a_failed_fetch_again_keeps_the_performance_it_had(root):
     [r] = s.list()
     assert r["state"] == "ready" and "could not be timed" in r["warning"]
     assert s.ready() and s.ready()[0]["id"] == sid
+
+
+def test_reimport_makes_a_fresh_score_from_the_stored_file(root):
+    seen = []
+
+    def convert(path, kind, rec):
+        seen.append((open(path, "rb").read(), rec.get("pipeline_id")))
+        rec["pipeline_id"] = f"s{len(seen)}"
+        return midi_bytes()
+
+    s = scores.Scores(root, convert, fetch=lambda u: b"%PDF mutopia", accepts=("pdf",))
+    old = s.add_item({"source": "mutopia", "ref": "1590", "title": "Nocturne, Op. 9, No. 2",
+                      "composer": "F. F. Chopin", "formats": {"pdf": "https://x/a.pdf"}})
+    s.step()
+    new = s.reimport(old["id"])
+    assert new["id"] != old["id"] and new["source"] == "mutopia" and new["ref"] == "1590"
+    s.step()
+    assert seen == [(b"%PDF mutopia", None), (b"%PDF mutopia", None)]   # a new pipeline score, same file
+    assert {r["id"]: r["pipeline_id"] for r in s.list()} == {old["id"]: "s1", new["id"]: "s2"}

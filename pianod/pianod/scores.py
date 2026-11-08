@@ -210,6 +210,19 @@ class Scores:
         self.wake.set()
         return dict(r)
 
+    def reimport(self, sid: str) -> dict:
+        """A new score from the file this one was made from, with the same source details: a fresh
+        reading and performance (the pipeline improved), without the source being reachable. The
+        old score stays until it's removed."""
+        with self.lock:
+            r = dict(self.items.get(sid) or {})
+        if not r or r.get("source") == "saxy":
+            raise ValueError("only a score pianod sent to the pipeline can be imported again")
+        with open(os.path.join(self.dir, sid, f"input.{r['input']}"), "rb") as f:
+            data = f.read()
+        return self._add(data, r["input"], {k: r.get(k) for k in
+                                            ("title", "composer", "detail", "source", "ref", "page", "licence")})
+
     def remove(self, sid: str) -> None:
         with self.lock:
             r = self.items.pop(sid, None)
