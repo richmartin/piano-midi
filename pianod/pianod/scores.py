@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import urllib.request
@@ -229,11 +230,11 @@ class Scores:
             if r is None:
                 raise ValueError(f"no such score {sid!r}")
             self._save()
-        for p in (self.midi_path(sid),):
-            try:
-                os.remove(p)
-            except OSError:
-                pass
+        try:
+            os.remove(self.midi_path(sid))         # (midi_path checks the id: nothing outside scores/)
+        except OSError:
+            pass
+        shutil.rmtree(os.path.join(self.dir, sid), ignore_errors=True)   # the file it was made from
 
     # --- converting ---------------------------------------------------------------------
     def _next(self):

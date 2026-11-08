@@ -237,3 +237,11 @@ def test_reimport_makes_a_fresh_score_from_the_stored_file(root):
     s.step()
     assert seen == [(b"%PDF mutopia", None), (b"%PDF mutopia", None)]   # a new pipeline score, same file
     assert {r["id"]: r["pipeline_id"] for r in s.list()} == {old["id"]: "s1", new["id"]: "s2"}
+
+
+def test_remove_takes_the_downloaded_file_too(root, tmp_path):
+    s = scores.Scores(root, lambda *a: midi_bytes())
+    sid = s.add_upload("a.pdf", b"%PDF", {})["id"]
+    s.step()
+    s.remove(sid)
+    assert not (tmp_path / "scores" / sid).exists() and not (tmp_path / "scores" / f"{sid}.mid").exists()
