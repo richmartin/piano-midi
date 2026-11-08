@@ -42,3 +42,21 @@ class TestEchoGate:
         g = EchoGate(window=0, clock=lambda: 0.0)
         g.sent(60, now=1.0)
         assert not g.is_echo("on", 60, now=1.0)
+
+
+def test_the_panels_own_usb_midi_port_is_never_taken_for_the_piano(monkeypatch):
+    import sys
+    import types
+
+    opened = []
+    fake = types.SimpleNamespace(
+        get_output_names=lambda: ["PyBadge:PyBadge CircuitPython usb_midi. 20:0", "Midi Through:Midi Through Port-0 14:0",
+                                  "UM-ONE:UM-ONE MIDI 1 24:0"],
+        get_input_names=lambda: ["PyBadge:PyBadge CircuitPython usb_midi. 20:0", "UM-ONE:UM-ONE MIDI 1 24:0"],
+        open_output=lambda name: opened.append(("out", name)) or object(),
+        open_input=lambda name: opened.append(("in", name)) or object())
+    monkeypatch.setitem(sys.modules, "mido", fake)
+    from pianod import midiio
+    midiio.open_ports()
+    assert ("out", "UM-ONE:UM-ONE MIDI 1 24:0") in opened
+    assert not any("PyBadge" in n for _, n in opened)

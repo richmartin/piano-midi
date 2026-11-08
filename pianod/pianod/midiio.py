@@ -159,7 +159,7 @@ def open_ports(match_out: str = "", match_in: str = ""):
     """Open the piano's MIDI out and in ports: (MidiOut, input port or None).
 
     A port matches if the pattern appears in its name (case-insensitive); an empty pattern takes
-    the first port that isn't a software thru port. Returns (MidiOut(None), None) when there is
+    the first port that isn't a software thru port or the panel's own. Returns (MidiOut(None), None) when there is
     no hardware — or no rtmidi backend at all — so pianod runs, silently, anywhere.
     """
     import mido
@@ -172,7 +172,11 @@ def open_ports(match_out: str = "", match_in: str = ""):
 
     def pick(names, pattern):
         for name in names:
-            if "through" in name.lower() or "thru" in name.lower():
+            low = name.lower()
+            # Not a software thru port, and never the panel: CircuitPython gives the PyBadge a USB
+            # MIDI port of its own, and on 2026-11-08 a reboot listed it before the UM-ONE, so the
+            # grand heard nothing while pianod played happily into the badge.
+            if any(w in low for w in ("through", "thru", "pybadge", "circuitpython")):
                 continue
             if pattern.lower() in name.lower():
                 return name
